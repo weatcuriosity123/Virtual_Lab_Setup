@@ -14,7 +14,7 @@ if [[ "$base_digest" != *@sha256:* ]]; then
   exit 1
 fi
 printf 'Building candidate from %s\n' "$base_digest"
-docker build --progress=plain --build-arg "WEBTOP_BASE=$base_digest" \
+docker build --build-arg "WEBTOP_BASE=$base_digest" \
   --label "lab.base.image=$base_digest" \
   -t linux-lab:cse-candidate "$source_dir/student-image/cse"
 printf '\nCandidate built. Existing classroom images and configuration are unchanged.\n'
