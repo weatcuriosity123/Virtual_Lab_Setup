@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 python3 -m py_compile backend/main.py
 python3 tests/test_lifecycle.py
+python3 tests/test_classrooms.py
 js_file="$(mktemp --suffix=.js)"
 trap 'rm -f "$js_file"' EXIT
 python3 - "$js_file" <<'PY'

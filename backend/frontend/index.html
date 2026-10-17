@@ -40,7 +40,7 @@ iframe{width:100%;flex:1;min-height:0;border:0;background:#111}
   <h1>Linux Practice Lab</h1>
   <p>Your own temporary Linux desktop, ready for practice.</p>
   <form id="startForm">
-    <label for="classCode">Class access code</label>
+    <label for="classCode">Classroom access code</label>
     <input id="classCode" type="password" required autocomplete="off">
     <button id="startButton">Start Lab</button>
   </form>
@@ -50,7 +50,7 @@ iframe{width:100%;flex:1;min-height:0;border:0;background:#111}
 
 <section id="lab" hidden>
   <header>
-    <strong>Linux Practice Lab</strong>
+    <strong id="labTitle">Linux Practice Lab</strong>
     <div>Time remaining <strong id="clock">--:--</strong></div>
     <div class="actions">
       <button id="credentialsButton" class="secondary">Credentials</button>
@@ -211,6 +211,7 @@ function openLab() {
   desktopReady = false;
   clearTimeout(pollTimer); clearInterval(clockTimer);
   show("lab");
+  $("labTitle").textContent = [session.college_name, session.classroom_name].filter(Boolean).join(" · ") || "Linux Practice Lab";
   $("password").textContent = session.desktop_password;
   $("credentials").hidden = false;
   $("desktop").src = "about:blank";
@@ -432,7 +433,9 @@ $("resumeForm").addEventListener("submit", async event => {
       desktop_username: "student",
       desktop_password: password,
       desktop_url: location.origin + `/s/${token}/`,
-      expires_at: data.expires_at, status: data.status
+      expires_at: data.expires_at, status: data.status,
+      college_name: data.college_name, classroom_name: data.classroom_name,
+      template_name: data.template_name
     };
 
     saveSession();

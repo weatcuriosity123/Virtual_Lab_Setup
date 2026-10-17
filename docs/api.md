@@ -21,3 +21,5 @@ Feedback JSON: `rating` integer 1–5, `worked` one of `yes`, `partially`, `no`,
 Expected errors include 401 invalid class code, 403 invalid session credentials, 409 invalid lifecycle transition, 429 all slots occupied, 503 service/cleanup not ready, and 422 invalid input. Creation failures return 500; inspect private server logs for the cause.
 
 `starting` sessions count toward capacity but return zero remaining usage seconds until activation. The starting expiry is a five-minute preparation deadline. Active expiry is the configured usage deadline. Client-reported readiness is not an anti-abuse guarantee: the backend only independently verifies the desktop HTTP service.
+
+Classroom codes use the existing POST /sessions access_code field. Responses also include college_name, classroom_name and template_name for the portal. Legacy query-code deletion is scoped to the matching classroom. No public catalog-management API is exposed.

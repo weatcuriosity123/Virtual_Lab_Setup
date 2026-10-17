@@ -18,3 +18,5 @@ __pycache__/
 *.zip
 cloudflare/config.yml
 cloudflare/*.json
+
+**/classrooms-backup-*/

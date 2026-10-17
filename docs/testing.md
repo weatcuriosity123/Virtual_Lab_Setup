@@ -24,3 +24,5 @@ The tests use temporary SQLite files and mock Docker/readiness calls. No Docker 
 9. Check a host reboot/maintenance procedure explicitly; automatic session reconstruction is not currently provided.
 
 Do these on a test host/hostname before changing the student image or migrating to EC2. See the scaling guide for load testing; HTTP throughput alone does not establish desktop capacity.
+
+Classroom regression checks also cover migration, per-classroom admission, resources, code rotation/expiry and cross-classroom retry/termination isolation. See [classrooms](classrooms.md).

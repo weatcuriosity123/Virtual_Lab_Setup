@@ -4,3 +4,4 @@ data/
 nginx/sessions/
 __pycache__/
 startup-backup-*/
+classrooms-backup-*/

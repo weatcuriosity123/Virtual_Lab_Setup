@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir \
     "uvicorn[standard]" \
     docker
 
-COPY main.py /app/main.py
+COPY main.py classrooms.py /app/
 
 EXPOSE 8000
 

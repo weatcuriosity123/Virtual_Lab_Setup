@@ -33,7 +33,7 @@ Example planning arithmetic, not a benchmark: 8 GiB minus a 2 GiB reserve divide
 - Improve Pi cooling/power, use SSD/Ethernet, or move to a larger EC2 host.
 - Prebuild the required applications in the image to avoid simultaneous downloads during class.
 - Reduce unnecessary desktop resolution/frame rate after measuring usability.
-- Raise `MAX_SESSIONS` only after measuring. Changes to memory/CPU limits currently require edits in `main.py` and rebuilding the API; they affect new containers.
+- Raise `MAX_SESSIONS` only after measuring. Register a new classroom template with measured CPU/memory limits through the CLI; templates affect new containers.
 - Add admission queues and per-user quotas before inviting large classes.
 
 ## Stage 2: remove single-host constraints

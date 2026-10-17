@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import docker
+import classrooms
 from docker.errors import DockerException, NotFound
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -21,7 +22,8 @@ app = FastAPI(
     root_path="/api",
 )
 
-CLASS_ACCESS_CODE = os.environ["CLASS_ACCESS_CODE"]
+CLASS_ACCESS_CODE = os.getenv("CLASS_ACCESS_CODE", "")
+ALLOW_LEGACY_CLASS_CODE = os.getenv("ALLOW_LEGACY_CLASS_CODE", "true").lower() == "true"
 PUBLIC_BASE_URL = os.getenv(
     "PUBLIC_BASE_URL", "https://vm.curiosity4u.in"
 ).rstrip("/")
@@ -69,7 +71,35 @@ def init_db():
         if "request_id" not in columns:
             db.execute("ALTER TABLE sessions ADD COLUMN request_id TEXT")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS session_request_id ON sessions(request_id)")
+        for name, kind in {
+            "college_id": "TEXT", "classroom_id": "TEXT", "template_id": "TEXT",
+            "session_minutes": "INTEGER", "college_name": "TEXT",
+            "classroom_name": "TEXT", "template_name": "TEXT",
+        }.items():
+            if name not in columns:
+                db.execute(f"ALTER TABLE sessions ADD COLUMN {name} {kind}")
         db.commit()
+        classrooms.init_catalog(db)
+
+
+def admission_context(code):
+    with closing(connect_db()) as db:
+        context = classrooms.resolve_classroom(db, code)
+    if context:
+        context["classroom_id"] = context["id"]
+        context["classroom_name"] = context["name"]
+        return context
+    if (ALLOW_LEGACY_CLASS_CODE and CLASS_ACCESS_CODE and
+            hmac.compare_digest(code.encode(), CLASS_ACCESS_CODE.encode())):
+        # A configured classroom may not be bypassed by reusing its code as legacy.
+        with closing(connect_db()) as db:
+            if any(classrooms.matches(code, row) for row in db.execute("SELECT * FROM classrooms")):
+                raise HTTPException(401, "Invalid or unavailable classroom code")
+        return dict(classroom_id=None, college_id=None, template_id=None,
+                    college_name=None, classroom_name="Linux Practice Lab", template_name="Linux desktop",
+                    image=STUDENT_IMAGE, memory_mb=768, cpu_millis=750, shm_mb=256,
+                    home_mb=300, pids=256, session_minutes=SESSION_MINUTES, max_sessions=MAX_SESSIONS)
+    raise HTTPException(401, "Invalid or unavailable classroom code")
 
 
 def reload_proxy():
@@ -201,18 +231,16 @@ def session_capacity():
 
 @app.post("/sessions")
 async def create_session(request: CreateSession):
-    if not hmac.compare_digest(
-        request.access_code, CLASS_ACCESS_CODE
-    ):
-        raise HTTPException(status_code=401, detail="Invalid class code")
-
     async with creation_lock:
+        context = await asyncio.to_thread(admission_context, request.access_code)
         cleanup_expired()
         now = datetime.now(timezone.utc)
         if request.request_id:
             with closing(connect_db()) as db:
                 existing = db.execute("SELECT * FROM sessions WHERE request_id = ?", (request.request_id,)).fetchone()
             if existing:
+                if existing["classroom_id"] != context["classroom_id"]:
+                    raise HTTPException(409, "Start request belongs to another classroom. Retry with a new request.")
                 if existing["status"] not in ("starting", "active"):
                     raise HTTPException(409, "This start attempt has ended. Start a new lab.")
                 return session_payload(existing)
@@ -233,21 +261,28 @@ async def create_session(request: CreateSession):
                 detail="All student desktops are in use. Try again later.",
             )
 
+        with closing(connect_db()) as db:
+            occupied = db.execute("""SELECT COUNT(*) FROM sessions
+                WHERE classroom_id IS ? AND status IN ('starting','active') AND expires_at > ?""",
+                (context["classroom_id"], now.isoformat())).fetchone()[0]
+        if occupied >= context["max_sessions"]:
+            raise HTTPException(429, "All desktops for this classroom are in use. Try again later.")
+
         try:
-            docker_client.images.get(STUDENT_IMAGE)
+            docker_client.images.get(context["image"])
 
             docker_client.containers.run(
-                image=STUDENT_IMAGE,
+                image=context["image"],
                 name=container_name,
                 detach=True,
                 network=DOCKER_NETWORK,
-                shm_size="256m",
+                shm_size=f"{context['shm_mb']}m",
                 tmpfs={
-                    "/config": "rw,size=300m,mode=1777",
+                    "/config": f"rw,size={context['home_mb']}m,mode=1777",
                 },
-                mem_limit="768m",
-                nano_cpus=750_000_000,
-                pids_limit=256,
+                mem_limit=f"{context['memory_mb']}m",
+                nano_cpus=context["cpu_millis"] * 1_000_000,
+                pids_limit=context["pids"],
                 security_opt=["no-new-privileges:true"],
                 environment={
                     "TZ": "Asia/Kolkata",
@@ -260,6 +295,9 @@ async def create_session(request: CreateSession):
                 labels={
                     "linux-lab.managed": "true",
                     "linux-lab.session": token,
+                    "linux-lab.college": context["college_id"] or "legacy",
+                    "linux-lab.classroom": context["classroom_id"] or "legacy",
+                    "linux-lab.template": context["template_id"] or "legacy",
                 },
             )
 
@@ -270,15 +308,18 @@ async def create_session(request: CreateSession):
                 db.execute("""
                     INSERT INTO sessions
                     (token, container_name, password,
-                     created_at, expires_at, status, request_id)
-                    VALUES (?, ?, ?, ?, ?, 'starting', ?)
+                     created_at, expires_at, status, request_id, college_id, classroom_id,
+                     template_id, session_minutes, college_name, classroom_name, template_name)
+                    VALUES (?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     token,
                     container_name,
                     password,
                     now.isoformat(),
                     expires.isoformat(),
-                    request.request_id,
+                    request.request_id, context["college_id"], context["classroom_id"],
+                    context["template_id"], context["session_minutes"], context["college_name"],
+                    context["classroom_name"], context["template_name"],
                 ))
                 db.commit()
 
@@ -299,32 +340,24 @@ async def create_session(request: CreateSession):
                 detail="Could not create a desktop. Check server logs.",
             )
 
-        return {
-            "session_id": token,
-            "desktop_url": f"{PUBLIC_BASE_URL}/s/{token}/",
-            "desktop_username": "student",
-            "desktop_password": password,
-            "expires_at": expires.isoformat(),
-            "session_minutes": SESSION_MINUTES,
-            "status": "starting",
-        }
+        with closing(connect_db()) as db:
+            return session_payload(db.execute("SELECT * FROM sessions WHERE token=?", (token,)).fetchone())
 
 
 @app.delete("/sessions/{token}")
 async def end_session(token: str, access_code: str):
-    if not hmac.compare_digest(access_code, CLASS_ACCESS_CODE):
-        raise HTTPException(status_code=401, detail="Invalid class code")
+    context = await asyncio.to_thread(admission_context, access_code)
 
     if not re.fullmatch(r"[0-9a-f]{32}", token):
         raise HTTPException(status_code=404, detail="Session not found")
 
     with closing(connect_db()) as db:
         row = db.execute(
-            "SELECT status FROM sessions WHERE token = ?",
+            "SELECT status, classroom_id FROM sessions WHERE token = ?",
             (token,),
         ).fetchone()
 
-    if row is None or row["status"] not in ("active", "starting"):
+    if row is None or row["classroom_id"] != context["classroom_id"] or row["status"] not in ("active", "starting"):
         raise HTTPException(status_code=404, detail="Active session not found")
 
     async with creation_lock:
@@ -386,6 +419,8 @@ async def lab_status(
             "status": row["status"],
             "expires_at": row["expires_at"],
             "server_time": now.isoformat(),
+            "college_name": row["college_name"], "classroom_name": row["classroom_name"],
+            "template_name": row["template_name"],
             "remaining_seconds": (
                 remaining if row["status"] == "active" else 0
             ),
@@ -689,7 +724,9 @@ def session_payload(row):
         "session_id": row["token"], "status": row["status"],
         "desktop_url": f"{PUBLIC_BASE_URL}/s/{row['token']}/",
         "desktop_username": "student", "desktop_password": row["password"],
-        "expires_at": row["expires_at"], "session_minutes": SESSION_MINUTES,
+        "expires_at": row["expires_at"], "session_minutes": row["session_minutes"] or SESSION_MINUTES,
+        "college_name": row["college_name"], "classroom_name": row["classroom_name"],
+        "template_name": row["template_name"],
         "server_time": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -734,7 +771,7 @@ async def activate_desktop(token: str, x_session_password: str = Header(...)):
         row = authorize_lab_session(token, x_session_password)
         if row["status"] != "starting" or datetime.now(timezone.utc) >= datetime.fromisoformat(row["expires_at"]):
             raise HTTPException(409, "Startup has ended.")
-        expires = datetime.now(timezone.utc) + timedelta(minutes=SESSION_MINUTES)
+        expires = datetime.now(timezone.utc) + timedelta(minutes=row["session_minutes"] or SESSION_MINUTES)
         with closing(connect_db()) as db:
             db.execute("UPDATE sessions SET status='active', expires_at=? WHERE token=?",
                        (expires.isoformat(), token))

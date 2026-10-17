@@ -6,9 +6,13 @@ An on-demand Linux desktop lab for students, hosted on a Raspberry Pi or a Linux
 
 Each student environment is a **Docker container**, not a separate virtual machine. On EC2, one AWS virtual machine hosts Docker and the student containers. The current frontend is plain HTML, CSS and JavaScript in `backend/frontend/index.html`; it does not require React or Node.js to deploy.
 
+## Multiple colleges and classrooms
+
+Register colleges, versioned lab templates and classrooms through the operator CLI. Each classroom has its own private code, duration and slot cap. See [setup and upgrade commands](docs/classrooms.md). Identity-based membership and an admin dashboard remain future work.
+
 ## Features
 
-- Class-code admission with a configurable session cap (default: four).
+- Multiple classroom codes with per-classroom limits and a shared host cap (default: four).
 - One temporary desktop per session with generated ID and password.
 - Loading screen, motivational thoughts every ten seconds, readiness checks and a manual preview fallback.
 - New-session timers start after desktop-picture detection and activation.
@@ -44,7 +48,7 @@ These are suggested starting configurations for validation, not measured concurr
 | Pi classroom pilot | Pi 5, 8 GB RAM, SSD 64 GB+, active cooling | 4 | Benchmark the actual exercises before increasing |
 | EC2 small pilot | Ubuntu Server 24.04 LTS, 4 vCPU, 8–16 GiB RAM, 40 GB+ encrypted gp3 EBS | 4 | Choose amd64 or ARM64 consistently with the desktop image |
 
-Defaults per student: 768 MiB memory limit, 0.75 CPU quota, 256 processes, 256 MiB shared-memory capacity and a 300 MiB `/config` tmpfs. The shared-memory/tmpfs capacities are not separate RAM reservations; their usage contributes to memory pressure. API and proxy limits are 256 MiB and 128 MiB. These values are in code/Compose, not configurable session-resource environment variables yet.
+Defaults per student: 768 MiB memory limit, 0.75 CPU quota, 256 processes, 256 MiB shared-memory capacity and a 300 MiB `/config` tmpfs. The shared-memory/tmpfs capacities are not separate RAM reservations; their usage contributes to memory pressure. API and proxy limits are 256 MiB and 128 MiB. Classroom templates can override student resource limits through the operator CLI; API/proxy limits remain in Compose.
 
 ## Quick start
 
@@ -76,7 +80,8 @@ Do not run a second copy beside the working installation on the same host: conta
 
 | Variable | Default/example | Purpose |
 |---|---|---|
-| `CLASS_ACCESS_CODE` | Required | Shared admission code; case-sensitive |
+| `CLASS_ACCESS_CODE` | Optional legacy code | Existing admission code during migration |
+| `ALLOW_LEGACY_CLASS_CODE` | `true` | Set `false` to admit through classroom codes only |
 | `PUBLIC_BASE_URL` | `https://lab.example.com` in example | Public portal origin |
 | `SESSION_MINUTES` | `60` | Active-session duration |
 | `MAX_SESSIONS` | `4` | Starting + active session limit |
@@ -92,12 +97,13 @@ docker compose up -d --force-recreate api
 docker compose restart proxy
 ```
 
-Existing desktop credentials remain valid. Admin-managed class codes, batch names and code expiry are future work.
+Existing desktop credentials remain valid. Multiple classroom codes, names and expiry can now be managed through the [backend CLI](docs/classrooms.md). A web admin dashboard is future work.
 
 ## Repository guide
 
 | Path | Contents |
 |---|---|
+| `backend/classrooms.py` | College/template/classroom database and local operator commands |
 | `backend/main.py` | Session creation, Docker lifecycle, auth, expiry, readiness, inactivity and feedback |
 | `backend/frontend/index.html` | Landing page, desktop wrapper, resume and feedback UI |
 | `backend/Dockerfile` | API container build |
