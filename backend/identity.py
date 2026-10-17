@@ -11,6 +11,8 @@ from fastapi import HTTPException
 MODE = os.getenv('AUTH_MODE', 'off').lower()
 ISSUER = os.getenv('CF_ACCESS_TEAM_URL', '').rstrip('/')
 AUDIENCE = os.getenv('CF_ACCESS_AUD', '')
+ADMIN_EMAILS = frozenset(email.strip().lower() for email in
+                         os.getenv('ADMIN_EMAILS', '').split(',') if email.strip())
 actor_context = ContextVar('lab_actor', default=None)
 _client = None
 _key_lock = Lock()
@@ -78,3 +80,14 @@ def require_owner(db, session):
         if current is None or session['owner_subject'] != current.subject or session['owner_email'] != current.email:
             raise HTTPException(403, 'This lab belongs to another account or predates verified login.')
         require_membership(db, session['classroom_id'])
+
+
+def is_admin():
+    current = actor()
+    return MODE == 'cloudflare' and current is not None and current.email in ADMIN_EMAILS
+
+
+def require_admin():
+    if not is_admin():
+        raise HTTPException(403, 'Administrator access required.')
+    return actor()

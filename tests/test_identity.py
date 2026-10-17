@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 work=tempfile.TemporaryDirectory()
 os.environ.update(SESSION_DB=work.name+'/db', SESSION_CONFIG_DIR=work.name+'/routes',
                   CLASS_ACCESS_CODE='legacy-test', AUTH_MODE='cloudflare',
+                  ADMIN_EMAILS=' Admin@example.com, second@example.com ',
                   CF_ACCESS_TEAM_URL='https://test-team.cloudflareaccess.com', CF_ACCESS_AUD='test-audience')
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'backend'))
 with patch('docker.from_env',return_value=MagicMock()):
@@ -93,3 +94,17 @@ identity.MODE='cloudflare'
 assert client.post(f'/lab/{sid}/terminate',headers=alice).status_code==200
 assert client.post(f'/lab/{sid}/feedback',headers=alice,json={'rating':5,'worked':'yes'}).status_code==200
 print('PASS: signed identity, forged/expired/wrong-audience tokens, roster checks, owner-bound retries/API/desktop, revocation and downgrade protection')
+
+# Admin privilege comes only from a verified JWT plus the server allowlist.
+assert client.get('/admin/me').status_code == 401
+assert client.get('/admin/me', headers=headers()).status_code == 403
+for email in ['admin@example.com', 'second@example.com']:
+    assert client.get('/admin/me', headers=headers('admin', email)).json()['role'] == 'admin'
+    assert client.get('/me', headers=headers('admin', email)).json()['is_admin'] is True
+assert client.get('/me', headers=headers()).json()['is_admin'] is False
+assert client.get('/admin/me', headers={
+    **headers(), 'Cf-Access-Authenticated-User-Email': 'admin@example.com'
+}).status_code == 403
+with patch.object(identity, 'MODE', 'off'):
+    assert client.get('/admin/me', headers=headers('admin', 'admin@example.com')).status_code == 403
+print('Admin authorization checks passed.')

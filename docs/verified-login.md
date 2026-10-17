@@ -92,3 +92,19 @@ Revocation takes effect at the next request/connection authorization check. It d
 - The browser still uses generated desktop credentials. This does not remove the desktop Basic Auth prompt.
 - Identity enforcement is an opt-in pilot feature, not a complete enterprise tenancy boundary: container networking/kernel isolation, quotas, rate limits, admin roles and the dashboard remain future work.
 - Automated checks use local RSA keys and mocked Docker; real Cloudflare, Nginx streaming and Pi deployment still need the acceptance steps above.
+
+## Administrator bootstrap
+
+Set `ADMIN_EMAILS=first@example.com,second@example.com` in the private backend `.env`
+and recreate the API with `docker compose up -d --force-recreate api`.
+Both accounts must also be allowed by the Cloudflare Access application policy.
+Do not commit real administrator email lists to the public repository.
+
+`GET /api/me` includes `is_admin`. `GET /api/admin/me` returns the verified
+administrator email and role; non-admin accounts receive 403. Admin access is
+always disabled when `AUTH_MODE=off` or the allowlist is empty. Email headers
+alone do not grant access. Removing an email and recreating the API revokes
+admin authorization on subsequent requests.
+
+This is the authorization foundation; a management dashboard is not implemented
+yet. Admin status does not bypass classroom enrollment or session ownership.

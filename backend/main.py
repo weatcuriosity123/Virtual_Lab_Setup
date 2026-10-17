@@ -826,7 +826,8 @@ async def activate_desktop(token: str, x_session_password: str = Header(...)):
 @app.get("/me")
 def current_account():
     current = identity.actor()
-    return {"auth_mode": identity.MODE, "email": current.email if current else None}
+    return {"auth_mode": identity.MODE, "email": current.email if current else None,
+            "is_admin": identity.is_admin()}
 
 
 @app.get("/desktop-authorize")
@@ -843,3 +844,9 @@ def desktop_authorize(request: HttpRequest):
             raise HTTPException(403, "Desktop session is unavailable")
         identity.require_owner(db, row)
     return {"status": "allowed"}
+
+
+@app.get("/admin/me")
+def admin_account():
+    current = identity.require_admin()
+    return {"email": current.email, "role": "admin"}
