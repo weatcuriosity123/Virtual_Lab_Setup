@@ -4,7 +4,7 @@ ARG WEBTOP_BASE=lscr.io/linuxserver/webtop:debian-xfce
 FROM ${WEBTOP_BASE}
 USER root
 ENV TZ=Asia/Kolkata
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ca-certificates curl gnupg \
     && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc -o /tmp/microsoft.asc \
     && gpg --dearmor --batch --yes -o /usr/share/keyrings/microsoft.gpg /tmp/microsoft.asc \
@@ -18,11 +18,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        code build-essential cmake gdb \
        python3 python3-pip python3-venv python3-numpy python3-pandas python3-matplotlib \
-       default-jdk maven nodejs npm \
+       default-jdk maven nodejs \
        git gh openssh-client jq wget zip unzip nano vim-tiny \
        sqlite3 postgresql-client default-mysql-client \
        iproute2 iputils-ping traceroute dnsutils netcat-openbsd \
        tcpdump wireshark tshark htop procps file less man-db \
+    && node --version && npm --version \
     && mkdir -p /opt/cse-lab \
     && dpkg-query -W > /opt/cse-lab/packages.tsv \
     && rm -f /tmp/microsoft.asc \

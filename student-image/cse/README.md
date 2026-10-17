@@ -23,3 +23,6 @@ to the student. Database clients need instructor-provided exercise databases.
 The base digest and installed package versions are recorded for validation.
 APT repository packages are not snapshot-pinned, so rebuilding later may produce
 new versions. Preserve the validated image by digest/archive for the pilot.
+
+The current Webtop base uses NodeSource Node.js. Its package provides npm; do not
+install Debian's separate npm package alongside it. The build checks both commands.
