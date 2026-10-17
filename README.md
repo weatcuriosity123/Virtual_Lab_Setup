@@ -156,3 +156,6 @@ No project license has been selected in this update. Third-party components reta
 
 Verified platform administrators can open `/admin` to manage colleges, classrooms,
 student enrollment, running labs and recent feedback. See [dashboard setup](docs/admin.md).
+
+College administrators now have access limited to their assigned colleges. Platform
+admins grant/revoke assignments through `/admin`. See the [pilot roadmap](docs/roadmap.md).

@@ -100,9 +100,10 @@ and recreate the API with `docker compose up -d --force-recreate api`.
 Both accounts must also be allowed by the Cloudflare Access application policy.
 Do not commit real administrator email lists to the public repository.
 
-`GET /api/me` includes `is_admin`. `GET /api/admin/me` returns the verified
+`GET /api/me` includes `is_admin` for platform and assigned college administrators. `GET /api/admin/me` returns the verified
 administrator email and role; non-admin accounts receive 403. Admin access is
-always disabled when `AUTH_MODE=off` or the allowlist is empty. Email headers
+always disabled when `AUTH_MODE=off`. An empty `ADMIN_EMAILS` disables platform
+admin access; existing college-admin assignments remain usable with verified login. Email headers
 alone do not grant access. Removing an email and recreating the API revokes
 admin authorization on subsequent requests.
 

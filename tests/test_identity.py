@@ -183,3 +183,53 @@ with patch('admin.json.dumps',side_effect=RuntimeError('test audit failure')):
 with classrooms.connect() as db:
     assert db.execute("SELECT 1 FROM colleges WHERE id='rollback'").fetchone() is None
 print('Admin activity attribution, redaction and transactional rollback checks passed.')
+
+# Two-college boundary: faculty manage only their assignment; students stay non-admin.
+faculty={**headers('faculty','faculty@example.com'),'X-Lab-Admin':'1'}
+assert client.get('/admin/overview',headers=faculty).status_code==403
+assert client.post('/admin/colleges/new/admins',headers=admin_headers,json={'email':'Faculty@example.com'}).status_code==200
+assert client.get('/admin/me',headers=faculty).json()['role']=='college_admin'
+assert client.get('/me',headers=faculty).json()['is_admin'] is True
+view=client.get('/admin/overview',headers=faculty).json()
+assert [c['id'] for c in view['colleges']]==['new']
+assert all(c['college_id']=='new' for c in view['classrooms'])
+assert all(e['college_id']=='new' for e in view['activity'])
+assert view['college_admins']==[] and not view['platform_admin']
+assert all('image' not in t for t in view['lab_templates'])
+assert all(m['classroom_id']!='test-class' for m in view['classroom_memberships'])
+for path,payload in [
+    ('colleges',{'id':'forbidden','name':'Forbidden'}),
+    ('colleges/new/enabled',{'enabled':False}),
+    ('colleges/test/admins',{'email':'faculty@example.com'}),
+    ('colleges/new/admins',{'email':'colleague@example.com'}),
+    ('classrooms',{**body,'id':'foreign-class','college_id':'test','code':'foreign-code'}),
+    ('classrooms/test-class/code',{'code':'foreign-code'}),
+    ('classrooms/test-class/enabled',{'enabled':False}),
+    ('classrooms/test-class/members',{'email':'intruder@example.com'}),
+    ('classrooms/test-class/members/bulk',{'emails':'intruder@example.com'}),
+    ('sessions/'+session['session_id']+'/terminate',{})]:
+    assert client.post('/admin/'+path,headers=faculty,json=payload).status_code==403,path
+assert client.post('/admin/classrooms',headers=faculty,json={**body,'id':'faculty-class','code':'faculty-code'}).status_code==200
+assert client.post('/admin/classrooms/faculty-class/members/bulk',headers=faculty,json={'emails':'learner@example.com'}).status_code==200
+assert client.post('/admin/classrooms/faculty-class/code',headers=faculty,json={'code':'faculty-rotated'}).status_code==200
+assert client.post('/admin/classrooms/faculty-class/enabled',headers=faculty,json={'enabled':False}).status_code==200
+# Make two active labs and feedback records, then verify scope before/after termination.
+with classrooms.connect() as db:
+    db.execute("UPDATE sessions SET status='active' WHERE token=?", (session['session_id'],))
+    db.execute("""INSERT INTO sessions(token,container_name,password,created_at,expires_at,status,college_id,classroom_id,classroom_name)
+        VALUES ('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','scoped-test','private-secret','2026-01-01','2099-01-01','active','new','faculty-class','Faculty Class')""")
+    db.execute("INSERT INTO feedback(session_token,rating,worked,comments,submitted_at) VALUES ('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',5,'yes','Scoped feedback','2026-01-01')")
+view=client.get('/admin/overview',headers=faculty).json()
+assert [r['token'] for r in view['sessions']]==['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']
+assert [r['comments'] for r in view['feedback']]==['Scoped feedback']
+assert client.post('/admin/sessions/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/terminate',headers=faculty,json={}).status_code==200
+assert client.post('/admin/colleges/new/admins',headers=admin_headers,json={'email':'faculty@example.com','enabled':False}).status_code==200
+assert client.get('/admin/overview',headers=faculty).status_code==403
+assert client.post('/admin/classrooms/faculty-class/code',headers=faculty,json={'code':'revoked-code'}).status_code==403
+# Migration retains legacy events with no scope; these are platform-only.
+with classrooms.connect() as db:
+    db.execute("INSERT INTO admin_events(occurred_at,actor_email,action,target,details) VALUES ('2026-01-01','admin@example.com','legacy.event','private-target','{}')")
+assert client.post('/admin/colleges/new/admins',headers=admin_headers,json={'email':'faculty@example.com'}).status_code==200
+assert all(r['action']!='legacy.event' for r in client.get('/admin/overview',headers=faculty).json()['activity'])
+assert any(r['action']=='legacy.event' for r in client.get('/admin/overview',headers=admin_headers).json()['activity'])
+print('College admin isolation, assignment, revocation, feedback and session scope checks passed.')

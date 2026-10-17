@@ -48,6 +48,9 @@ def init_catalog(db):
         id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at TEXT NOT NULL,
         actor_email TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,
         details TEXT NOT NULL)""")
+    db.execute("CREATE TABLE IF NOT EXISTS college_admins (college_id TEXT NOT NULL REFERENCES colleges(id), email TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(college_id,email))")
+    if 'college_id' not in {row[1] for row in db.execute('PRAGMA table_info(admin_events)')}:
+        db.execute('ALTER TABLE admin_events ADD COLUMN college_id TEXT')
     db.commit()
 
 

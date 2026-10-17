@@ -849,7 +849,9 @@ def desktop_authorize(request: HttpRequest):
 @app.get("/admin/me")
 def admin_account():
     current = identity.require_admin()
-    return {"email": current.email, "role": "admin"}
+    with closing(classrooms.connect()) as db:
+        return {"email": current.email, "role": "admin" if identity.is_platform_admin() else "college_admin",
+                "platform_admin": identity.is_platform_admin(), "college_ids": identity.admin_colleges(db)}
 
 
 import admin

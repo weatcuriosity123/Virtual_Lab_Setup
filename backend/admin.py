@@ -56,9 +56,18 @@ def make_router(lab):
     router = APIRouter(prefix='/admin', dependencies=[Depends(identity.require_admin), Depends(mutation_guard)])
 
     def record(db, action, target, details):
-        db.execute('INSERT INTO admin_events(occurred_at,actor_email,action,target,details) VALUES (?,?,?,?,?)',
-                   (datetime.now(timezone.utc).isoformat(), identity.require_admin().email,
-                    action, target, json.dumps(details or {}, sort_keys=True)))
+        college_id = None
+        if action.startswith(('college.', 'colleges.', 'college_admin.')):
+            college_id = target
+        elif action.startswith(('classroom.', 'classrooms.', 'membership.')):
+            row = db.execute('SELECT college_id FROM classrooms WHERE id=?', (target,)).fetchone()
+            college_id = row[0] if row else None
+        elif action.startswith('session.'):
+            row = db.execute('SELECT college_id FROM sessions WHERE token=?', (target,)).fetchone()
+            college_id = row[0] if row else None
+        db.execute('INSERT INTO admin_events(occurred_at,actor_email,action,target,details,college_id) VALUES (?,?,?,?,?,?)',
+                   (datetime.now(timezone.utc).isoformat(), identity.actor().email,
+                    action, target, json.dumps(details or {}, sort_keys=True), college_id))
 
     def write(operation, action, target, details=None):
         try:
@@ -77,31 +86,63 @@ def make_router(lab):
         if not db.execute('SELECT 1 FROM '+table+' WHERE id=?', (key,)).fetchone():
             raise HTTPException(404, 'Entry not found.')
 
+    def classroom_scope(db, key):
+        row = db.execute('SELECT college_id FROM classrooms WHERE id=?', (key,)).fetchone()
+        if row is None:
+            raise HTTPException(404, 'Classroom not found.')
+        identity.require_college_admin(db, row['college_id'])
+
     @router.get('/overview')
     def overview():
         with closing(classrooms.connect()) as db:
-            result = {}
-            for table in ['colleges', 'lab_templates', 'classrooms', 'classroom_memberships']:
-                result[table] = [{k: row[k] for k in row.keys() if k not in ('code_hash','code_salt')}
-                                 for row in db.execute('SELECT * FROM '+table)]
-            result['sessions'] = [dict(row) for row in db.execute("""SELECT token,owner_email,
-                college_name,classroom_name,status,expires_at FROM sessions
-                WHERE status IN ('active','starting') ORDER BY expires_at""")]
+            platform = identity.is_platform_admin()
+            ids = identity.admin_colleges(db)
+            if not platform and not ids:
+                raise HTTPException(403, 'Administrator access required.')
+            def scope(column):
+                return ('1=1', []) if platform else (column+' IN ('+','.join('?' for _ in ids)+')', ids)
+            def rows(sql, column):
+                condition, params = scope(column)
+                return [dict(row) for row in db.execute(sql.replace('{scope}',condition), params)]
+            result = {'platform_admin': platform}
+            result['colleges'] = rows('SELECT * FROM colleges WHERE {scope}', 'id')
+            result['classrooms'] = rows('''SELECT id,college_id,template_id,name,session_minutes,max_sessions,
+                expires_at,enabled FROM classrooms WHERE {scope}''', 'college_id')
+            result['lab_templates'] = [dict(row) for row in db.execute(
+                'SELECT * FROM lab_templates' if platform else 'SELECT id,name,enabled FROM lab_templates')]
+            result['classroom_memberships'] = rows('''SELECT m.* FROM classroom_memberships m
+                JOIN classrooms c ON c.id=m.classroom_id WHERE {scope}''','c.college_id')
+            result['sessions'] = rows('''SELECT token,owner_email,college_name,classroom_name,status,expires_at
+                FROM sessions WHERE status IN ('active','starting') AND {scope} ORDER BY expires_at''','college_id')
             has_feedback = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feedback'").fetchone()
-            result['feedback'] = [dict(row) for row in db.execute('''SELECT f.rating,f.worked,f.comments,
-                f.submitted_at,s.classroom_name FROM feedback f LEFT JOIN sessions s
-                ON s.token=f.session_token ORDER BY f.submitted_at DESC LIMIT 100''')] if has_feedback else []
-            result['activity'] = [dict(row) for row in db.execute('SELECT * FROM admin_events ORDER BY id DESC LIMIT 100')]
+            result['feedback'] = rows('''SELECT f.rating,f.worked,f.comments,f.submitted_at,s.classroom_name
+                FROM feedback f LEFT JOIN sessions s ON s.token=f.session_token
+                WHERE {scope} ORDER BY f.submitted_at DESC LIMIT 100''', 's.college_id') if has_feedback else []
+            result['activity'] = rows('SELECT * FROM admin_events WHERE {scope} ORDER BY id DESC LIMIT 100','college_id')
+            result['college_admins'] = [dict(row) for row in db.execute('SELECT * FROM college_admins')] if platform else []
             result['capacity'] = lab.MAX_SESSIONS
             return result
 
+    @router.post('/colleges/{key}/admins')
+    def assign_admin(key: str, body: Member):
+        identity.require_platform_admin()
+        def operation(db):
+            exists(db, 'colleges', key)
+            db.execute('''INSERT INTO college_admins(college_id,email,enabled) VALUES (?,?,?)
+                ON CONFLICT(college_id,email) DO UPDATE SET enabled=excluded.enabled''',
+                (key,body.email.lower(),body.enabled))
+        return write(operation, 'college_admin.granted' if body.enabled else 'college_admin.revoked', key,
+                     {'email':body.email.lower()})
+
     @router.post('/colleges')
     def college(body: Entry):
+        identity.require_platform_admin()
         return write(lambda db: db.execute('INSERT INTO colleges(id,name) VALUES (?,?)', (body.id,body.name)), 'college.created', body.id)
 
     @router.post('/classrooms')
     def classroom(body: Classroom):
         def operation(db):
+            identity.require_college_admin(db, body.college_id)
             digest,salt = classrooms.new_code(db,body.code)
             db.execute('''INSERT INTO classrooms(id,name,college_id,template_id,code_hash,code_salt,session_minutes,max_sessions)
                 VALUES (?,?,?,?,?,?,?,?)''', (body.id,body.name,body.college_id,body.template_id,digest,salt,body.session_minutes,body.max_sessions))
@@ -110,7 +151,7 @@ def make_router(lab):
     @router.post('/classrooms/{key}/code')
     def rotate(key: str, body: Code):
         def operation(db):
-            exists(db,'classrooms',key)
+            classroom_scope(db,key)
             digest,salt = classrooms.new_code(db,body.code,exclude=key)
             db.execute('UPDATE classrooms SET code_hash=?,code_salt=? WHERE id=?',(digest,salt,key))
         return write(operation, 'classroom.code_rotated', key)
@@ -118,7 +159,7 @@ def make_router(lab):
     @router.post('/classrooms/{key}/members')
     def member(key: str, body: Member):
         def operation(db):
-            exists(db,'classrooms',key)
+            classroom_scope(db,key)
             db.execute('''INSERT INTO classroom_memberships(classroom_id,email,enabled) VALUES (?,?,?)
                 ON CONFLICT(classroom_id,email) DO UPDATE SET enabled=excluded.enabled''',
                 (key,body.email.lower(),body.enabled))
@@ -136,7 +177,7 @@ def make_router(lab):
         unique = list(dict.fromkeys(entries))
         counts = dict(added=0, reenabled=0, unchanged=0, duplicates=len(entries)-len(unique))
         def operation(db):
-            exists(db, 'classrooms', key)
+            classroom_scope(db,key)
             for email in unique:
                 previous = db.execute('SELECT enabled FROM classroom_memberships WHERE classroom_id=? AND email=?',
                                       (key, email)).fetchone()
@@ -157,6 +198,10 @@ def make_router(lab):
         if table is None:
             raise HTTPException(404, 'Unsupported entry type.')
         def operation(db):
+            if kind == 'colleges':
+                identity.require_platform_admin()
+            else:
+                classroom_scope(db,key)
             exists(db,table,key)
             db.execute('UPDATE '+table+' SET enabled=? WHERE id=?',(body.enabled,key))
         return write(operation, kind+'.enabled' if body.enabled else kind+'.disabled', key)
@@ -165,9 +210,10 @@ def make_router(lab):
     async def terminate(token: str):
         async with lab.creation_lock:
             with closing(classrooms.connect()) as db:
-                row = db.execute('SELECT status FROM sessions WHERE token=?',(token,)).fetchone()
+                row = db.execute('SELECT status,college_id FROM sessions WHERE token=?',(token,)).fetchone()
                 if row is None:
                     raise HTTPException(404,'Session not found.')
+                identity.require_college_admin(db, row['college_id'])
             if row['status'] in ('active','starting'):
                 write(lambda db: None, 'session.termination_requested', token)
                 try:

@@ -5,8 +5,8 @@ and Nginx configuration. Keep the existing Cloudflare Access application coverin
 the entire hostname. Set `AUTH_MODE=cloudflare` and `ADMIN_EMAILS` in the private
 backend `.env`, as described in [verified login](verified-login.md).
 
-Platform admins can manage all colleges. This release does not implement
-college-scoped instructor roles.
+Platform admins can manage all colleges. College admins manage only their assigned
+colleges. Both use `/admin`; the backend filters data and checks every mutation.
 
 ## Available operations
 
@@ -72,3 +72,42 @@ attempts, not CLI changes, denied requests, or automatic session expiry.
 
 There is no dashboard delete/edit operation for events. This is a local operational
 log, not a tamper-proof audit service: a server/database operator can modify it.
+
+## College administrator permissions
+
+Platform admins are the verified emails configured in `ADMIN_EMAILS`. Only they
+can create/disable colleges and grant or revoke college-admin assignments.
+
+In the College administrators panel, choose a college and enter the faculty email.
+The same email may be assigned to multiple colleges. Assignments take effect on
+subsequent API requests, without rebuilding or restarting the server. Revoking
+one college assignment keeps any other assignments intact. An assignment does
+not override platform privileges from `ADMIN_EMAILS`.
+
+College admins can create classrooms in their assigned colleges, select from the
+shared template catalog, rotate codes, manage enrollment, disable/enable classrooms,
+terminate their colleges' labs, and read their colleges' feedback and activity.
+They cannot grant roles, create/disable colleges, or access another college's labs.
+Host capacity is shared. Per-college resource budgets and template entitlements
+are not part of this release.
+
+Allow faculty through the existing Cloudflare policy separately. Student lab
+access still requires classroom enrollment; admin permission does not grant the
+ability to open another student's desktop.
+
+The schema upgrade is additive. Older activity events without a college scope
+remain visible only to platform admins. Colleges cannot be reassigned or deleted
+through this dashboard. CLI operations continue to require trusted host access.
+
+### Deployment acceptance test
+
+1. As a platform admin, grant a separate test/faculty email access to one college.
+2. In a separate browser profile, sign in as that email and visit `/admin`.
+3. Confirm that only the assigned college's classrooms, roster, labs, feedback
+   and new activity appear. Test a classroom/enrollment change in that college.
+4. As platform admin, revoke the assignment. Refresh the faculty dashboard;
+   it should deny access unless that email has another college assignment.
+
+Automated API tests cover attempts to manipulate another college by changing IDs,
+plus role escalation, revocation, scoped reads and session termination. Live
+Cloudflare/browser verification is still required on your deployment.

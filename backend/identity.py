@@ -82,7 +82,7 @@ def require_owner(db, session):
         require_membership(db, session['classroom_id'])
 
 
-def is_admin():
+def is_platform_admin():
     current = actor()
     return MODE == 'cloudflare' and current is not None and current.email in ADMIN_EMAILS
 
@@ -91,3 +91,35 @@ def require_admin():
     if not is_admin():
         raise HTTPException(403, 'Administrator access required.')
     return actor()
+
+
+def admin_colleges(db):
+    current = actor()
+    if MODE != 'cloudflare' or current is None:
+        return []
+    return [row[0] for row in db.execute(
+        'SELECT college_id FROM college_admins WHERE email=? AND enabled=1', (current.email,))]
+
+
+def is_admin():
+    if is_platform_admin():
+        return True
+    if MODE != 'cloudflare' or actor() is None:
+        return False
+    from contextlib import closing
+    import classrooms
+    with closing(classrooms.connect()) as db:
+        return bool(admin_colleges(db))
+
+
+def require_platform_admin():
+    if not is_platform_admin():
+        raise HTTPException(403, 'Platform administrator access required.')
+    return actor()
+
+
+def require_college_admin(db, college_id):
+    if is_platform_admin():
+        return
+    if college_id is None or college_id not in admin_colleges(db):
+        raise HTTPException(403, 'This college is outside your administrator scope.')
