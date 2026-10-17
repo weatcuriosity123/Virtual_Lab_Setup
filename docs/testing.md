@@ -5,7 +5,7 @@ Run from the repository root with Python 3.12 and Node.js available (Node is onl
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install fastapi docker httpx
+python -m pip install fastapi docker httpx "PyJWT[crypto]>=2.10,<3"
 bash scripts/check.sh
 ```
 
@@ -26,3 +26,5 @@ The tests use temporary SQLite files and mock Docker/readiness calls. No Docker 
 Do these on a test host/hostname before changing the student image or migrating to EC2. See the scaling guide for load testing; HTTP throughput alone does not establish desktop capacity.
 
 Classroom regression checks also cover migration, per-classroom admission, resources, code rotation/expiry and cross-classroom retry/termination isolation. See [classrooms](classrooms.md).
+
+Identity tests verify real RSA signatures using a local test key and exercise HTTP routes for expired/forged tokens, wrong issuer/audience, membership, owner isolation and desktop authorization. Cloudflare/JWKS network and real Nginx streaming are not simulated end-to-end.

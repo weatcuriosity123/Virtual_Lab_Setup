@@ -8,9 +8,10 @@ WORKDIR /app
 RUN pip install --no-cache-dir \
     fastapi \
     "uvicorn[standard]" \
-    docker
+    docker \
+    "PyJWT[crypto]>=2.10,<3"
 
-COPY main.py classrooms.py /app/
+COPY main.py classrooms.py identity.py /app/
 
 EXPOSE 8000
 

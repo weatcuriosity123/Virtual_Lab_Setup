@@ -1,6 +1,6 @@
 # Colleges, classrooms and lab templates
 
-This release adds code-based admission for multiple classrooms. It does not verify college membership yet. Anyone holding a valid code can request a lab; Cloudflare identity integration, student rosters and user-owned sessions are the next phase. No college, template or real code is seeded automatically.
+This release adds code-based admission for multiple classrooms. With the default AUTH_MODE=off, anyone holding a valid code can request a lab. Optional [verified login](verified-login.md) now adds signed-in identity, explicit classroom email rosters and owner-bound sessions. No college, template or real code is seeded automatically.
 
 ## Upgrade the working Pi
 
@@ -10,7 +10,7 @@ From a separate checkout of the updated repository, run:
 bash scripts/install-classrooms.sh ~/linux-lab/backend
 ```
 
-The installer requires no active/starting sessions. It backs up the source files and SQLite using the existing API, copies the updated Python modules, Dockerfile and portal, rebuilds the API and restarts Nginx. It preserves `.env`, Compose, Nginx configuration and runtime routes. Database migration is additive and repeatable. It does not install a new student image.
+The installer requires no active/starting sessions. It backs up the source files and SQLite using the existing API, copies the updated Python modules, Dockerfile and portal, updates the matching identity module and Nginx configuration, rebuilds the API and restarts Nginx. It preserves `.env` and Compose; generated routes are refreshed at API startup. Database migration is additive and repeatable. It does not install a new student image.
 
 ## Create PCCOER and a Linux lab
 

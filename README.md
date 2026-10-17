@@ -2,13 +2,17 @@
 
 An on-demand Linux desktop lab for students, hosted on a Raspberry Pi or a Linux server. Students enter a class code, receive a temporary desktop, practise through their browser, and submit feedback when the session ends.
 
-**Status:** the maintainer has verified the current application on Raspberry Pi. EC2 instructions are a deployment guide, not an EC2 benchmark or a claim of a completed cloud deployment.
+**Status:** the maintainer verified the earlier core lab flow on Raspberry Pi. New classroom/identity changes require the documented live acceptance checks. EC2 instructions are a deployment guide, not an EC2 benchmark or a claim of a completed cloud deployment.
 
 Each student environment is a **Docker container**, not a separate virtual machine. On EC2, one AWS virtual machine hosts Docker and the student containers. The current frontend is plain HTML, CSS and JavaScript in `backend/frontend/index.html`; it does not require React or Node.js to deploy.
 
 ## Multiple colleges and classrooms
 
-Register colleges, versioned lab templates and classrooms through the operator CLI. Each classroom has its own private code, duration and slot cap. See [setup and upgrade commands](docs/classrooms.md). Identity-based membership and an admin dashboard remain future work.
+Register colleges, versioned lab templates and classrooms through the operator CLI. Each classroom has its own private code, duration and slot cap. See [setup and upgrade commands](docs/classrooms.md). Optional [verified login and classroom membership](docs/verified-login.md) are now available. An admin dashboard remains future work.
+
+## Verified student login
+
+Cloudflare Access enforcement can validate signed-in identity, restrict classroom admission to enrolled emails, and bind API/desktop access to the session owner. It is off by default; follow [configuration and acceptance checks](docs/verified-login.md) before enabling it.
 
 ## Features
 
@@ -103,6 +107,7 @@ Existing desktop credentials remain valid. Multiple classroom codes, names and e
 
 | Path | Contents |
 |---|---|
+| `backend/identity.py` | Signed Access token validation and membership/ownership checks |
 | `backend/classrooms.py` | College/template/classroom database and local operator commands |
 | `backend/main.py` | Session creation, Docker lifecycle, auth, expiry, readiness, inactivity and feedback |
 | `backend/frontend/index.html` | Landing page, desktop wrapper, resume and feedback UI |

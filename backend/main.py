@@ -10,8 +10,10 @@ from pathlib import Path
 
 import docker
 import classrooms
+import identity
 from docker.errors import DockerException, NotFound
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request as HttpRequest
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 app = FastAPI(
@@ -21,6 +23,24 @@ app = FastAPI(
     openapi_url="/openapi.json",
     root_path="/api",
 )
+
+@app.middleware("http")
+async def verified_identity(request: HttpRequest, call_next):
+    current = None
+    if identity.MODE == "cloudflare" and request.url.path.rstrip("/") not in ("/health", "/api/health"):
+        try:
+            current = await asyncio.to_thread(identity.verify, request.headers.get("Cf-Access-Jwt-Assertion"))
+        except HTTPException as exc:
+            return JSONResponse({"detail": exc.detail, "code": "AUTH_REQUIRED" if exc.status_code == 401 else "AUTH_UNAVAILABLE"}, status_code=exc.status_code,
+                                headers={"Cache-Control": "no-store"})
+    marker = identity.actor_context.set(current)
+    try:
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    finally:
+        identity.actor_context.reset(marker)
+
 
 CLASS_ACCESS_CODE = os.getenv("CLASS_ACCESS_CODE", "")
 ALLOW_LEGACY_CLASS_CODE = os.getenv("ALLOW_LEGACY_CLASS_CODE", "true").lower() == "true"
@@ -74,6 +94,7 @@ def init_db():
         for name, kind in {
             "college_id": "TEXT", "classroom_id": "TEXT", "template_id": "TEXT",
             "session_minutes": "INTEGER", "college_name": "TEXT",
+            "owner_subject": "TEXT", "owner_email": "TEXT",
             "classroom_name": "TEXT", "template_name": "TEXT",
         }.items():
             if name not in columns:
@@ -86,10 +107,13 @@ def admission_context(code):
     with closing(connect_db()) as db:
         context = classrooms.resolve_classroom(db, code)
     if context:
+        if identity.MODE == "cloudflare":
+            with closing(connect_db()) as db:
+                identity.require_membership(db, context["id"])
         context["classroom_id"] = context["id"]
         context["classroom_name"] = context["name"]
         return context
-    if (ALLOW_LEGACY_CLASS_CODE and CLASS_ACCESS_CODE and
+    if (identity.MODE == "off" and ALLOW_LEGACY_CLASS_CODE and CLASS_ACCESS_CODE and
             hmac.compare_digest(code.encode(), CLASS_ACCESS_CODE.encode())):
         # A configured classroom may not be bypassed by reusing its code as legacy.
         with closing(connect_db()) as db:
@@ -116,6 +140,7 @@ def reload_proxy():
 def write_route(token: str, container_name: str):
     config = f"""
 location ^~ /s/{token}/ {{
+    auth_request /_lab_auth;
     resolver 127.0.0.11 valid=10s ipv6=off;
     set $student_upstream http://{container_name}:3000;
 
@@ -194,8 +219,15 @@ async def expiry_worker():
 
 @app.on_event("startup")
 async def startup():
+    identity.validate_config()
     init_db()
     cleanup_expired()
+    # Existing routes must use the same ownership gate as newly created routes.
+    with closing(connect_db()) as db:
+        routes = db.execute("SELECT token,container_name FROM sessions WHERE status IN ('starting','active')").fetchall()
+    for row in routes:
+        write_route(row["token"], row["container_name"])
+    reload_proxy()
     app.state.expiry_task = asyncio.create_task(expiry_worker())
 
 
@@ -239,6 +271,8 @@ async def create_session(request: CreateSession):
             with closing(connect_db()) as db:
                 existing = db.execute("SELECT * FROM sessions WHERE request_id = ?", (request.request_id,)).fetchone()
             if existing:
+                with closing(connect_db()) as db:
+                    identity.require_owner(db, existing)
                 if existing["classroom_id"] != context["classroom_id"]:
                     raise HTTPException(409, "Start request belongs to another classroom. Retry with a new request.")
                 if existing["status"] not in ("starting", "active"):
@@ -309,8 +343,9 @@ async def create_session(request: CreateSession):
                     INSERT INTO sessions
                     (token, container_name, password,
                      created_at, expires_at, status, request_id, college_id, classroom_id,
-                     template_id, session_minutes, college_name, classroom_name, template_name)
-                    VALUES (?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?)
+                     template_id, session_minutes, college_name, classroom_name, template_name,
+                     owner_subject, owner_email)
+                    VALUES (?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     token,
                     container_name,
@@ -320,6 +355,8 @@ async def create_session(request: CreateSession):
                     request.request_id, context["college_id"], context["classroom_id"],
                     context["template_id"], context["session_minutes"], context["college_name"],
                     context["classroom_name"], context["template_name"],
+                    identity.actor().subject if identity.actor() else None,
+                    identity.actor().email if identity.actor() else None,
                 ))
                 db.commit()
 
@@ -346,6 +383,8 @@ async def create_session(request: CreateSession):
 
 @app.delete("/sessions/{token}")
 async def end_session(token: str, access_code: str):
+    if identity.MODE == "cloudflare":
+        raise HTTPException(403, "Use the owner-authenticated lab termination endpoint.")
     context = await asyncio.to_thread(admission_context, access_code)
 
     if not re.fullmatch(r"[0-9a-f]{32}", token):
@@ -353,13 +392,15 @@ async def end_session(token: str, access_code: str):
 
     with closing(connect_db()) as db:
         row = db.execute(
-            "SELECT status, classroom_id FROM sessions WHERE token = ?",
+            "SELECT * FROM sessions WHERE token = ?",
             (token,),
         ).fetchone()
 
     if row is None or row["classroom_id"] != context["classroom_id"] or row["status"] not in ("active", "starting"):
         raise HTTPException(status_code=404, detail="Active session not found")
 
+    with closing(connect_db()) as db:
+        identity.require_owner(db, row)
     async with creation_lock:
         delete_session(token)
 
@@ -389,6 +430,8 @@ def authorize_lab_session(token: str, password: str):
             detail="Invalid session credentials",
         )
 
+    with closing(connect_db()) as db:
+        identity.require_owner(db, row)
     return row
 
 
@@ -778,3 +821,25 @@ async def activate_desktop(token: str, x_session_password: str = Header(...)):
             db.commit()
         touch_idle(token)
         return session_payload(authorize_lab_session(token, x_session_password))
+
+
+@app.get("/me")
+def current_account():
+    current = identity.actor()
+    return {"auth_mode": identity.MODE, "email": current.email if current else None}
+
+
+@app.get("/desktop-authorize")
+def desktop_authorize(request: HttpRequest):
+    # Called by Nginx auth_request. Basic desktop authentication is still applied
+    # downstream; this gate adds owner checks for HTTP and WebSocket handshakes.
+    path = request.headers.get("X-Original-URI", "").split("?", 1)[0]
+    matched = re.match(r"^/s/([0-9a-f]{32})/", path)
+    if not matched:
+        raise HTTPException(403, "Desktop access denied")
+    with closing(connect_db()) as db:
+        row = db.execute("SELECT * FROM sessions WHERE token=?", (matched[1],)).fetchone()
+        if row is None or row["status"] not in ("starting", "active") or datetime.now(timezone.utc) >= datetime.fromisoformat(row["expires_at"]):
+            raise HTTPException(403, "Desktop session is unavailable")
+        identity.require_owner(db, row)
+    return {"status": "allowed"}

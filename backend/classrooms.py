@@ -41,6 +41,9 @@ def init_catalog(db):
       max_sessions INTEGER NOT NULL CHECK(max_sessions > 0),
       expires_at TEXT, enabled INTEGER NOT NULL DEFAULT 1);
     ''')
+    db.execute("""CREATE TABLE IF NOT EXISTS classroom_memberships (
+      classroom_id TEXT NOT NULL REFERENCES classrooms(id), email TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(classroom_id,email))""")
     db.commit()
 
 
@@ -141,6 +144,12 @@ def main():
     state.add_argument('kind', choices=['college', 'template', 'classroom'])
     state.add_argument('id', type=identifier)
     state.add_argument('enabled', choices=['yes', 'no'])
+    member = commands.add_parser('member-add')
+    member.add_argument('classroom', type=identifier)
+    member.add_argument('--email', required=True)
+    revoke = commands.add_parser('member-disable')
+    revoke.add_argument('classroom', type=identifier)
+    revoke.add_argument('--email', required=True)
     commands.add_parser('list')
     args = parser.parse_args()
     try:
@@ -148,7 +157,7 @@ def main():
             init_catalog(db)
             if args.command == 'list':
                 result = {}
-                for table in ['colleges', 'lab_templates', 'classrooms']:
+                for table in ['colleges', 'lab_templates', 'classrooms', 'classroom_memberships']:
                     result[table] = [{k: row[k] for k in row.keys() if k not in ('code_hash', 'code_salt')}
                                      for row in db.execute('SELECT * FROM '+table)]
                 print(json.dumps(result, indent=2))
@@ -156,7 +165,19 @@ def main():
             # Serialize local operators, including code uniqueness checks.
             code = prompt_code() if args.command in ('classroom-add', 'code-rotate') else None
             db.execute('BEGIN IMMEDIATE')
-            if args.command == 'college-add':
+            if args.command in ('member-add', 'member-disable'):
+                email = args.email.strip().lower()
+                if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email) or len(email)>254:
+                    raise ValueError('Provide a valid student email address.')
+                if args.command == 'member-add':
+                    db.execute("""INSERT INTO classroom_memberships(classroom_id,email) VALUES (?,?)
+                      ON CONFLICT(classroom_id,email) DO UPDATE SET enabled=1""", (args.classroom,email))
+                else:
+                    result=db.execute('UPDATE classroom_memberships SET enabled=0 WHERE classroom_id=? AND email=?',
+                                      (args.classroom,email))
+                    if result.rowcount != 1:
+                        raise ValueError('Membership not found.')
+            elif args.command == 'college-add':
                 db.execute('INSERT INTO colleges(id,name) VALUES (?,?)', (args.id, args.name))
             elif args.command == 'template-add':
                 if not args.image or any(ch.isspace() for ch in args.image):
@@ -181,7 +202,7 @@ def main():
                 if result.rowcount != 1:
                     raise ValueError('Entry not found.')
             db.commit()
-            print('Saved. Changes apply to new admissions; existing sessions keep their settings.')
+            print('Saved. Membership changes apply on the next access check; classroom settings apply to new admissions.')
     except (ValueError, sqlite3.Error) as exc:
         parser.exit(1, f'Error: {exc}\n')
 

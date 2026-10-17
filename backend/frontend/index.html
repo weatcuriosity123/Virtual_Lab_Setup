@@ -35,9 +35,14 @@ iframe{width:100%;flex:1;min-height:0;border:0;background:#111}
 </style>
 </head>
 <body>
+<div id="signInNotice" hidden role="alert" style="padding:12px;background:#78350f;color:white">
+  Your sign-in needs attention. <a href="/" style="color:white">Sign in again and resume your lab</a>.
+  Active lab timers continue while disconnected.
+</div>
 
 <section id="entry" class="card">
   <h1>Linux Practice Lab</h1>
+  <p id="accountInfo" class="muted"></p>
   <p>Your own temporary Linux desktop, ready for practice.</p>
   <form id="startForm">
     <label for="classCode">Classroom access code</label>
@@ -129,6 +134,16 @@ function saveSession() {
   }
 }
 
+async function readResponse(response) {
+  if (response.redirected || (response.ok && !response.headers.get("content-type")?.includes("application/json"))) {
+    $("signInNotice").hidden = false;
+    throw new Error("Sign in again through the lab portal, then resume your session.");
+  }
+  const data = await response.json().catch(() => ({}));
+  if (data.code === "AUTH_REQUIRED") $("signInNotice").hidden = false;
+  return data;
+}
+
 async function api(path, method = "GET", body) {
   const headers = {};
   if (session) headers["X-Session-Password"] = session.desktop_password;
@@ -142,7 +157,7 @@ async function api(path, method = "GET", body) {
     signal: AbortSignal.timeout(20000)
   });
 
-  const data = await response.json().catch(() => ({}));
+  const data = await readResponse(response);
   if (!response.ok) {
     const message = typeof data.detail === "string"
       ? data.detail : `Request failed (${response.status})`;
@@ -414,7 +429,7 @@ $("resumeForm").addEventListener("submit", async event => {
       signal: AbortSignal.timeout(20000)
     });
 
-    const data = await response.json().catch(() => ({}));
+    const data = await readResponse(response);
 
     if (!response.ok) {
       throw new Error(
@@ -827,5 +842,10 @@ async function prepareDesktop() {
 }
 </script>
 
+<script>
+api("/me").then(data => {
+  if (data.email) $("accountInfo").textContent = "Signed in as " + data.email;
+}).catch(() => {});
+</script>
 </body>
 </html>

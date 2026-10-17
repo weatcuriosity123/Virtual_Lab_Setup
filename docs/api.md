@@ -23,3 +23,5 @@ Expected errors include 401 invalid class code, 403 invalid session credentials,
 `starting` sessions count toward capacity but return zero remaining usage seconds until activation. The starting expiry is a five-minute preparation deadline. Active expiry is the configured usage deadline. Client-reported readiness is not an anti-abuse guarantee: the backend only independently verifies the desktop HTTP service.
 
 Classroom codes use the existing POST /sessions access_code field. Responses also include college_name, classroom_name and template_name for the portal. Legacy query-code deletion is scoped to the matching classroom. No public catalog-management API is exposed.
+
+In AUTH_MODE=cloudflare, all endpoints except /health require a valid Cf-Access-Jwt-Assertion. Session-password endpoints additionally require the owning subject/email and enabled classroom membership. GET /me reports the verified email and auth mode. GET /desktop-authorize is used by Nginx's internal auth_request with X-Original-URI; it checks session ownership and availability without returning credentials. Legacy query-code DELETE is disabled in this mode.

@@ -17,3 +17,5 @@ For a locally managed tunnel, `cloudflare/config.example.yml` shows the ingress 
 Keep the connector on the host for this example. If it runs in another container, `127.0.0.1` points to that container and this origin address will not work.
 
 Cloudflare Access can add identity-based access for the whole hostname. Test its login/session-expiry behaviour with the iframe and WebSocket stream. The class code is admission to create a session; it is not a full identity system or a replacement for a secure application gateway. Avoid caching authenticated API/session responses.
+
+For backend-verified identities, classroom email rosters and desktop ownership enforcement, follow [verified login](verified-login.md). Merely adding an edge Allow policy does not enable these backend checks.

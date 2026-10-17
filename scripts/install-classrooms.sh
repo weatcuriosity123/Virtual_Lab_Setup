@@ -14,9 +14,11 @@ if count:
 PY
 stamp="$(date +%Y%m%d-%H%M%S)"
 backup_dir="$target_dir/classrooms-backup-$stamp"
-mkdir -p "$backup_dir/frontend"
+mkdir -p "$backup_dir/frontend" "$backup_dir/nginx"
 cp main.py Dockerfile "$backup_dir/"
 cp frontend/index.html "$backup_dir/frontend/"
+cp nginx/default.conf "$backup_dir/nginx/"
+if [ -f identity.py ]; then cp identity.py "$backup_dir/"; fi
 if [ -f classrooms.py ]; then cp classrooms.py "$backup_dir/"; fi
 docker compose exec -T api python - <<'PY'
 import sqlite3,os
@@ -29,14 +31,16 @@ with sqlite3.connect(src) as a,sqlite3.connect(dst) as b:
     a.backup(b)
 print('Database backup:',dst)
 PY
-cp "$source_dir/backend/main.py" "$source_dir/backend/classrooms.py" "$source_dir/backend/Dockerfile" .
+cp "$source_dir/backend/main.py" "$source_dir/backend/classrooms.py" "$source_dir/backend/identity.py" "$source_dir/backend/Dockerfile" .
 cp "$source_dir/backend/frontend/index.html" frontend/index.html
+cp "$source_dir/backend/nginx/default.conf" nginx/default.conf
 printf 'Source backup: %s\n' "$backup_dir"
 if ! docker compose up -d --build api; then
   printf 'Build/start failed. Restore source files from the printed backup and rebuild the API.\n' >&2
   exit 1
 fi
 docker compose restart proxy
+docker compose exec -T proxy nginx -t
 docker compose exec -T api python - <<'PY'
 import time,urllib.request
 for attempt in range(20):
