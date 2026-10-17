@@ -10,8 +10,10 @@ trap 'rm -f "$js_file"' EXIT
 python3 - "$js_file" <<'PY'
 import re, sys
 from pathlib import Path
-source = Path('backend/frontend/index.html').read_text()
-Path(sys.argv[1]).write_text('\n'.join(re.findall(r'<script>(.*?)</script>', source, re.S)))
+scripts = []
+for page in Path('backend/frontend').glob('*.html'):
+    scripts.append('(function(){\n' + '\n'.join(re.findall(r'<script>(.*?)</script>', page.read_text(), re.S)) + '\n})();')
+Path(sys.argv[1]).write_text('\n'.join(scripts))
 PY
 node --check "$js_file"
 printf 'Python lifecycle and JavaScript syntax checks passed.\n'

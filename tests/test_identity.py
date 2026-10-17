@@ -108,3 +108,35 @@ assert client.get('/admin/me', headers={
 with patch.object(identity, 'MODE', 'off'):
     assert client.get('/admin/me', headers=headers('admin', 'admin@example.com')).status_code == 403
 print('Admin authorization checks passed.')
+
+admin_headers = {**headers('admin','admin@example.com'), 'X-Lab-Admin':'1'}
+assert client.get('/admin/overview',headers=headers()).status_code == 403
+assert client.get('/admin/overview').status_code == 401
+assert client.post('/admin/colleges',headers=headers('admin','admin@example.com'),json={'id':'new','name':'New'}).status_code == 403
+assert client.post('/admin/colleges',headers=admin_headers,json={'id':'new','name':'New'}).status_code == 200
+assert client.post('/admin/colleges',headers=admin_headers,json={'id':'new','name':'New'}).status_code == 409
+body=dict(id='new-class',name='New Class',college_id='new',template_id='linux',code='new-secret',session_minutes=30,max_sessions=2)
+assert client.post('/admin/classrooms',headers=admin_headers,json=body).status_code == 200
+assert client.post('/admin/classrooms',headers=admin_headers,json={**body,'id':'duplicate-code'}).status_code == 400
+assert client.post('/admin/classrooms',headers=admin_headers,json={**body,'id':'missing','college_id':'missing','code':'other-secret'}).status_code == 409
+assert client.post('/admin/classrooms/new-class/members',headers=admin_headers,json={'email':'Student@example.com'}).status_code == 200
+assert client.post('/admin/classrooms/new-class/code',headers=headers(),json={'code':'stolen-secret'}).status_code == 403
+assert client.post('/admin/classrooms/new-class/code',headers=admin_headers,json={'code':'rotated-secret'}).status_code == 200
+with classrooms.connect() as db:
+    assert classrooms.resolve_classroom(db,'new-secret') is None
+    assert classrooms.resolve_classroom(db,'rotated-secret')['id'] == 'new-class'
+assert client.post('/admin/classrooms/new-class/enabled',headers=admin_headers,json={'enabled':False}).status_code == 200
+assert client.post('/admin/classrooms/new-class/members',headers=admin_headers,json={'email':'student@example.com','enabled':False}).status_code == 200
+overview=client.get('/admin/overview',headers=admin_headers)
+assert overview.status_code == 200
+assert 'code_hash' not in overview.text and 'code_salt' not in overview.text and 'password' not in overview.text
+assert next(r for r in overview.json()['classroom_memberships'] if r['email']=='student@example.com')['enabled'] == 0
+assert client.post('/admin/sessions/missing/terminate',headers=admin_headers,json={}).status_code == 404
+# Administrators can terminate an existing session without receiving desktop credentials.
+with classrooms.connect() as db:
+    db.execute("UPDATE sessions SET status='active' WHERE token=?",(session['session_id'],))
+assert client.post('/admin/sessions/'+session['session_id']+'/terminate',headers=headers(),json={}).status_code == 403
+assert client.post('/admin/sessions/'+session['session_id']+'/terminate',headers=admin_headers,json={}).status_code == 200
+with classrooms.connect() as db:
+    assert db.execute('SELECT status FROM sessions WHERE token=?',(session['session_id'],)).fetchone()[0]=='expired'
+print('Admin management API checks passed.')

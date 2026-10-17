@@ -106,5 +106,5 @@ always disabled when `AUTH_MODE=off` or the allowlist is empty. Email headers
 alone do not grant access. Removing an email and recreating the API revokes
 admin authorization on subsequent requests.
 
-This is the authorization foundation; a management dashboard is not implemented
-yet. Admin status does not bypass classroom enrollment or session ownership.
+The dashboard is available at `/admin`. Admin status does not bypass classroom
+enrollment or session ownership for student lab access. See [Admin dashboard](admin.md).

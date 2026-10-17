@@ -850,3 +850,8 @@ def desktop_authorize(request: HttpRequest):
 def admin_account():
     current = identity.require_admin()
     return {"email": current.email, "role": "admin"}
+
+
+import admin
+import sys
+app.include_router(admin.make_router(sys.modules[__name__]))

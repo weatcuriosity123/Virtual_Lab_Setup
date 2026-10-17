@@ -151,3 +151,8 @@ The branches present during this update were `main`, `Sandbox` and `Hosting-VM-O
 - [EC2 security groups](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-security-groups.html)
 
 No project license has been selected in this update. Third-party components retain their own licenses.
+
+### Administration
+
+Verified platform administrators can open `/admin` to manage colleges, classrooms,
+student enrollment, running labs and recent feedback. See [dashboard setup](docs/admin.md).
