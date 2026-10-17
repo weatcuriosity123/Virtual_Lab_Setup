@@ -43,7 +43,7 @@ appears in Active labs. Terminate that test lab and verify feedback still works.
 Use Refresh to reload lists; there is no automatic refresh in this release.
 
 The dashboard uses same-origin JSON requests and a required custom mutation
-header. No cross-origin CORS is enabled. No audit log, CSV file upload, pagination,
+header. No cross-origin CORS is enabled. No CSV file upload, pagination,
 billing or college-specific admin permissions is provided in this version.
 
 ## Bulk enrollment
@@ -55,3 +55,20 @@ entry saves nothing. Addresses are lowercased and duplicates ignored. Existing
 disabled memberships are re-enabled. The result reports all counts. Retry safely
 if the connection fails: existing enabled memberships are counted as unchanged.
 This does not add students to Cloudflare Access policies or send invitations.
+
+## Admin activity
+
+The dashboard shows the latest 100 admin events. SQLite retains older events
+and the normal database backup includes them. Database changes and their events
+commit together. Termination records requested and completed/failed events
+separately because Docker operations cannot share the SQLite transaction. A
+requested event without an outcome may mean the API stopped mid-operation.
+
+Events record the verified administrator email, UTC timestamp, action and target.
+Individual enrollment events include the student email; bulk events include counts.
+Codes, passwords and request bodies are not logged. Existing historical actions
+are not reconstructed. This tracks successful dashboard changes and termination
+attempts, not CLI changes, denied requests, or automatic session expiry.
+
+There is no dashboard delete/edit operation for events. This is a local operational
+log, not a tamper-proof audit service: a server/database operator can modify it.

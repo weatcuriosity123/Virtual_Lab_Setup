@@ -2,6 +2,8 @@
 from contextlib import closing
 import sqlite3
 import re
+import json
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 import classrooms
@@ -53,11 +55,17 @@ def mutation_guard(request: Request):
 def make_router(lab):
     router = APIRouter(prefix='/admin', dependencies=[Depends(identity.require_admin), Depends(mutation_guard)])
 
-    def write(operation):
+    def record(db, action, target, details):
+        db.execute('INSERT INTO admin_events(occurred_at,actor_email,action,target,details) VALUES (?,?,?,?,?)',
+                   (datetime.now(timezone.utc).isoformat(), identity.require_admin().email,
+                    action, target, json.dumps(details or {}, sort_keys=True)))
+
+    def write(operation, action, target, details=None):
         try:
             with closing(classrooms.connect()) as db:
                 db.execute('BEGIN IMMEDIATE')
                 operation(db)
+                record(db, action, target, details)
                 db.commit()
         except ValueError as exc:
             raise HTTPException(400, str(exc))
@@ -83,12 +91,13 @@ def make_router(lab):
             result['feedback'] = [dict(row) for row in db.execute('''SELECT f.rating,f.worked,f.comments,
                 f.submitted_at,s.classroom_name FROM feedback f LEFT JOIN sessions s
                 ON s.token=f.session_token ORDER BY f.submitted_at DESC LIMIT 100''')] if has_feedback else []
+            result['activity'] = [dict(row) for row in db.execute('SELECT * FROM admin_events ORDER BY id DESC LIMIT 100')]
             result['capacity'] = lab.MAX_SESSIONS
             return result
 
     @router.post('/colleges')
     def college(body: Entry):
-        return write(lambda db: db.execute('INSERT INTO colleges(id,name) VALUES (?,?)', (body.id,body.name)))
+        return write(lambda db: db.execute('INSERT INTO colleges(id,name) VALUES (?,?)', (body.id,body.name)), 'college.created', body.id)
 
     @router.post('/classrooms')
     def classroom(body: Classroom):
@@ -96,7 +105,7 @@ def make_router(lab):
             digest,salt = classrooms.new_code(db,body.code)
             db.execute('''INSERT INTO classrooms(id,name,college_id,template_id,code_hash,code_salt,session_minutes,max_sessions)
                 VALUES (?,?,?,?,?,?,?,?)''', (body.id,body.name,body.college_id,body.template_id,digest,salt,body.session_minutes,body.max_sessions))
-        return write(operation)
+        return write(operation, 'classroom.created', body.id)
 
     @router.post('/classrooms/{key}/code')
     def rotate(key: str, body: Code):
@@ -104,7 +113,7 @@ def make_router(lab):
             exists(db,'classrooms',key)
             digest,salt = classrooms.new_code(db,body.code,exclude=key)
             db.execute('UPDATE classrooms SET code_hash=?,code_salt=? WHERE id=?',(digest,salt,key))
-        return write(operation)
+        return write(operation, 'classroom.code_rotated', key)
 
     @router.post('/classrooms/{key}/members')
     def member(key: str, body: Member):
@@ -113,7 +122,7 @@ def make_router(lab):
             db.execute('''INSERT INTO classroom_memberships(classroom_id,email,enabled) VALUES (?,?,?)
                 ON CONFLICT(classroom_id,email) DO UPDATE SET enabled=excluded.enabled''',
                 (key,body.email.lower(),body.enabled))
-        return write(operation)
+        return write(operation, 'membership.enabled' if body.enabled else 'membership.disabled', key, {'email': body.email.lower()})
 
     @router.post('/classrooms/{key}/members/bulk')
     def bulk_members(key: str, body: BulkMembers):
@@ -139,7 +148,7 @@ def make_router(lab):
                     counts['reenabled'] += 1
                 else:
                     counts['unchanged'] += 1
-        write(operation)
+        write(operation, 'membership.bulk_enrolled', key, counts)
         return {'status': 'saved', **counts}
 
     @router.post('/{kind}/{key}/enabled')
@@ -150,7 +159,7 @@ def make_router(lab):
         def operation(db):
             exists(db,table,key)
             db.execute('UPDATE '+table+' SET enabled=? WHERE id=?',(body.enabled,key))
-        return write(operation)
+        return write(operation, kind+'.enabled' if body.enabled else kind+'.disabled', key)
 
     @router.post('/sessions/{token}/terminate')
     async def terminate(token: str):
@@ -160,7 +169,13 @@ def make_router(lab):
                 if row is None:
                     raise HTTPException(404,'Session not found.')
             if row['status'] in ('active','starting'):
-                lab.delete_session(token)
+                write(lambda db: None, 'session.termination_requested', token)
+                try:
+                    lab.delete_session(token)
+                except Exception:
+                    write(lambda db: None, 'session.termination_failed', token)
+                    raise
+                write(lambda db: None, 'session.terminated', token)
         return {'status':'ended'}
 
     return router

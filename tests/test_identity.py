@@ -163,3 +163,23 @@ assert client.post(bulk,headers=admin_headers,json={'emails':'   '}).status_code
 assert client.post(bulk,headers=admin_headers,json={'emails':','.join('u%d@example.com'%i for i in range(501))}).status_code==400
 assert client.post('/admin/classrooms/missing/members/bulk',headers=admin_headers,json={'emails':'new@example.com'}).status_code==404
 print('Bulk enrollment validation, atomicity, deduplication and retry checks passed.')
+
+activity=client.get('/admin/overview',headers=admin_headers).json()['activity']
+assert activity and all(row['actor_email']=='admin@example.com' for row in activity)
+assert any(row['action']=='classroom.code_rotated' for row in activity)
+assert any(row['action']=='session.terminated' for row in activity)
+assert any(row['action']=='membership.bulk_enrolled' for row in activity)
+serialized=str(activity)
+assert 'rotated-secret' not in serialized and 'MixedCaseCode' not in serialized and password not in serialized
+before=len(activity)
+assert client.post('/admin/colleges',headers=admin_headers,json={'id':'new','name':'Duplicate'}).status_code==409
+assert len(client.get('/admin/overview',headers=admin_headers).json()['activity'])==before
+# An event-write failure must roll back its associated catalog change.
+with patch('admin.json.dumps',side_effect=RuntimeError('test audit failure')):
+    try:
+        client.post('/admin/colleges',headers=admin_headers,json={'id':'rollback','name':'Rollback'})
+    except RuntimeError:
+        pass
+with classrooms.connect() as db:
+    assert db.execute("SELECT 1 FROM colleges WHERE id='rollback'").fetchone() is None
+print('Admin activity attribution, redaction and transactional rollback checks passed.')
