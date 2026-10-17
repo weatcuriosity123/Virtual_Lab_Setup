@@ -2,7 +2,7 @@
 from contextlib import closing
 import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 import classrooms
 import identity
 
@@ -10,6 +10,12 @@ import identity
 class Entry(BaseModel):
     id: str = Field(pattern=r'^[a-z0-9][a-z0-9-]{0,63}$')
     name: str = Field(min_length=1, max_length=120, pattern=r'.*\S.*')
+
+
+    @field_validator('id', mode='before')
+    @classmethod
+    def normalize_id(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
 
 
 class Classroom(Entry):

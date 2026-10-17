@@ -140,3 +140,12 @@ assert client.post('/admin/sessions/'+session['session_id']+'/terminate',headers
 with classrooms.connect() as db:
     assert db.execute('SELECT status FROM sessions WHERE token=?',(session['session_id'],)).fetchone()[0]=='expired'
 print('Admin management API checks passed.')
+
+assert client.post('/admin/colleges',headers=admin_headers,json={'id':' COETrial ','name':'COE'}).status_code == 200
+assert client.post('/admin/classrooms',headers=admin_headers,json={**body,'id':'PCCOER-Entc-2026','code':'MixedCaseCode'}).status_code == 200
+with classrooms.connect() as db:
+    assert db.execute("SELECT name FROM colleges WHERE id='coetrial'").fetchone()[0] == 'COE'
+    assert classrooms.resolve_classroom(db,'MixedCaseCode')['id'] == 'pccoer-entc-2026'
+    assert classrooms.resolve_classroom(db,'mixedcasecode') is None
+assert client.post('/admin/colleges',headers=admin_headers,json={'id':'bad id','name':'Test'}).status_code == 422
+print('Mixed-case ID normalization and case-sensitive code checks passed.')
