@@ -149,3 +149,17 @@ with classrooms.connect() as db:
     assert classrooms.resolve_classroom(db,'mixedcasecode') is None
 assert client.post('/admin/colleges',headers=admin_headers,json={'id':'bad id','name':'Test'}).status_code == 422
 print('Mixed-case ID normalization and case-sensitive code checks passed.')
+
+bulk='/admin/classrooms/new-class/members/bulk'
+assert client.post(bulk,headers=headers(),json={'emails':'outsider@example.com'}).status_code==403
+assert client.post(bulk,headers=admin_headers,json={'emails':'valid@example.com,invalid-email'}).status_code==400
+with classrooms.connect() as db:
+    assert db.execute("SELECT 1 FROM classroom_memberships WHERE email='valid@example.com'").fetchone() is None
+result=client.post(bulk,headers=admin_headers,json={'emails':'Student@example.com; new@example.com\nNEW@example.com'}).json()
+assert result==dict(status='saved',added=1,reenabled=1,unchanged=0,duplicates=1)
+result=client.post(bulk,headers=admin_headers,json={'emails':'student@example.com,new@example.com'}).json()
+assert result['added']==0 and result['unchanged']==2
+assert client.post(bulk,headers=admin_headers,json={'emails':'   '}).status_code==400
+assert client.post(bulk,headers=admin_headers,json={'emails':','.join('u%d@example.com'%i for i in range(501))}).status_code==400
+assert client.post('/admin/classrooms/missing/members/bulk',headers=admin_headers,json={'emails':'new@example.com'}).status_code==404
+print('Bulk enrollment validation, atomicity, deduplication and retry checks passed.')

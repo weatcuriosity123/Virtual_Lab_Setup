@@ -1,6 +1,7 @@
 """Platform administration; all routes require a verified administrator."""
 from contextlib import closing
 import sqlite3
+import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 import classrooms
@@ -33,6 +34,10 @@ class Code(BaseModel):
 class Member(BaseModel):
     email: str = Field(max_length=254, pattern=r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
     enabled: bool = True
+
+
+class BulkMembers(BaseModel):
+    emails: str = Field(min_length=1, max_length=130000)
 
 
 class State(BaseModel):
@@ -109,6 +114,33 @@ def make_router(lab):
                 ON CONFLICT(classroom_id,email) DO UPDATE SET enabled=excluded.enabled''',
                 (key,body.email.lower(),body.enabled))
         return write(operation)
+
+    @router.post('/classrooms/{key}/members/bulk')
+    def bulk_members(key: str, body: BulkMembers):
+        entries = [value.strip().lower() for value in re.split(r'[\s,;]+', body.emails) if value.strip()]
+        if not entries or len(entries) > 500:
+            raise HTTPException(400, 'Paste between 1 and 500 email addresses per batch.')
+        invalid = [index + 1 for index, email in enumerate(entries)
+                   if len(email) > 254 or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email)]
+        if invalid:
+            raise HTTPException(400, 'Invalid email at entry positions: '+', '.join(map(str, invalid[:20]))+'. Nothing was saved.')
+        unique = list(dict.fromkeys(entries))
+        counts = dict(added=0, reenabled=0, unchanged=0, duplicates=len(entries)-len(unique))
+        def operation(db):
+            exists(db, 'classrooms', key)
+            for email in unique:
+                previous = db.execute('SELECT enabled FROM classroom_memberships WHERE classroom_id=? AND email=?',
+                                      (key, email)).fetchone()
+                if previous is None:
+                    db.execute('INSERT INTO classroom_memberships(classroom_id,email) VALUES (?,?)', (key,email))
+                    counts['added'] += 1
+                elif not previous['enabled']:
+                    db.execute('UPDATE classroom_memberships SET enabled=1 WHERE classroom_id=? AND email=?', (key,email))
+                    counts['reenabled'] += 1
+                else:
+                    counts['unchanged'] += 1
+        write(operation)
+        return {'status': 'saved', **counts}
 
     @router.post('/{kind}/{key}/enabled')
     def enabled(kind: str, key: str, body: State):

@@ -13,7 +13,7 @@ college-scoped instructor roles.
 - Create colleges; enable or disable college admissions.
 - Create classrooms with a custom code, existing template, duration and slot limit.
 - Rotate classroom codes; enable or disable admissions.
-- Add, disable or re-enable student email enrollment.
+- Add up to 500 student emails per batch; disable or re-enable individual enrollment.
 - List active/starting labs and terminate them after confirmation.
 - Read the latest 100 feedback submissions.
 
@@ -43,5 +43,15 @@ appears in Active labs. Terminate that test lab and verify feedback still works.
 Use Refresh to reload lists; there is no automatic refresh in this release.
 
 The dashboard uses same-origin JSON requests and a required custom mutation
-header. No cross-origin CORS is enabled. No audit log, bulk import, pagination,
+header. No cross-origin CORS is enabled. No audit log, CSV file upload, pagination,
 billing or college-specific admin permissions is provided in this version.
+
+## Bulk enrollment
+
+Select a classroom and paste email addresses in Enroll students. Separate them
+with newlines, spaces, commas or semicolons. Do not include CSV headers or names.
+The server validates the entire batch before saving in one transaction; an invalid
+entry saves nothing. Addresses are lowercased and duplicates ignored. Existing
+disabled memberships are re-enabled. The result reports all counts. Retry safely
+if the connection fails: existing enabled memberships are counted as unchanged.
+This does not add students to Cloudflare Access policies or send invitations.
