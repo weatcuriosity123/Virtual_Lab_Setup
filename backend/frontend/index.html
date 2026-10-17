@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linux Practice Lab</title>
+<style>
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:#0b1120;color:#e5e7eb;font:16px system-ui,sans-serif}
+button,input,select,textarea{font:inherit}
+button{padding:11px 17px;border:0;border-radius:9px;background:#2563eb;color:white;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+input,select,textarea{width:100%;padding:12px;margin:8px 0 18px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:white}
+label{display:block}
+.card{max-width:480px;margin:8vh auto;padding:30px;background:#172033;border:1px solid #334155;border-radius:18px}
+h1{margin-top:0;font-size:28px}
+p{line-height:1.6;color:#cbd5e1}
+.muted{font-size:14px;color:#94a3b8}
+.actions{display:flex;gap:10px;flex-wrap:wrap}
+.secondary{background:#334155}
+.danger{background:#b91c1c}
+#lab{height:100dvh;display:flex;flex-direction:column}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 18px;background:#172033;flex-wrap:wrap}
+#clock{font-size:22px;font-variant-numeric:tabular-nums}
+#connection{padding:7px 18px;background:#1e293b;font-size:13px}
+#credentials{padding:10px 18px;background:#233148;overflow-wrap:anywhere}
+iframe{width:100%;flex:1;min-height:0;border:0;background:#111}
+#error{color:#fca5a5;white-space:pre-wrap}
+#feedbackMessage{color:#93c5fd}
+.spinner{display:inline-block;width:20px;height:20px;border:3px solid #475569;border-top-color:#93c5fd;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spinner{animation:none}}
+@media(max-width:540px){.card{margin:24px 12px;padding:22px}}
+</style>
+</head>
+<body>
+
+<section id="entry" class="card">
+  <h1>Linux Practice Lab</h1>
+  <p>Your own temporary Linux desktop, ready for practice.</p>
+  <form id="startForm">
+    <label for="classCode">Class access code</label>
+    <input id="classCode" type="password" required autocomplete="off">
+    <button id="startButton">Start Lab</button>
+  </form>
+  <p class="muted">Your files and changes are deleted when the session ends.</p>
+  <p id="error" role="alert"></p>
+</section>
+
+<section id="lab" hidden>
+  <header>
+    <strong>Linux Practice Lab</strong>
+    <div>Time remaining <strong id="clock">--:--</strong></div>
+    <div class="actions">
+      <button id="credentialsButton" class="secondary">Credentials</button>
+      <button id="fullscreenButton" class="secondary">Fullscreen</button>
+      <button id="endButton" class="danger">End Lab</button>
+    </div>
+  </header>
+  <div id="connection" role="status">Checking session…</div>
+  <div id="credentials" hidden>
+    Username: <strong>student</strong> ·
+    Password: <code id="password"></code>
+    <div class="muted">Use these credentials in the desktop login prompt.
+    Keep them private; they work only for this session.</div>
+  </div>
+  <iframe id="desktop" title="Student Linux desktop"
+    allow="fullscreen; clipboard-read; clipboard-write"></iframe>
+</section>
+
+<section id="feedback" class="card" hidden>
+  <h1 id="endTitle">Session ended</h1>
+  <p>Your temporary desktop has been removed. How was your experience?</p>
+  <form id="feedbackForm">
+    <label for="rating">Overall experience</label>
+    <select id="rating" required>
+      <option value="">Choose a rating</option>
+      <option value="5">5 — Excellent</option>
+      <option value="4">4 — Good</option>
+      <option value="3">3 — Okay</option>
+      <option value="2">2 — Poor</option>
+      <option value="1">1 — Very poor</option>
+    </select>
+    <label for="worked">Did the lab work properly?</label>
+    <select id="worked" required>
+      <option value="">Choose an answer</option>
+      <option value="yes">Yes</option>
+      <option value="partially">Partially</option>
+      <option value="no">No</option>
+    </select>
+    <label for="comments">Comments — optional</label>
+    <textarea id="comments" rows="4" maxlength="2000"
+      placeholder="What worked well? What should improve?"></textarea>
+    <div class="actions">
+      <button id="submitFeedback">Submit feedback</button>
+      <button type="button" id="skipFeedback" class="secondary">Skip</button>
+    </div>
+  </form>
+  <p id="feedbackMessage" role="status"></p>
+  <button id="returnButton" class="secondary" hidden>Back to start</button>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const storageKey = "linuxLabSession";
+let session = null;
+let deadline = 0;
+let pollTimer = null;
+let clockTimer = null;
+let screen = "entry";
+let ending = false;
+let desktopReady = false;
+let startupGeneration = 0;
+
+function show(name) {
+  screen = name;
+  for (const id of ["entry", "lab", "feedback"]) {
+    $(id).hidden = id !== name;
+  }
+}
+
+function saveSession() {
+  try {
+    sessionStorage.setItem(storageKey, JSON.stringify(session));
+  } catch {
+    $("connection").textContent =
+      "Browser storage unavailable. Keep this tab open to retain your session.";
+  }
+}
+
+async function api(path, method = "GET", body) {
+  const headers = {};
+  if (session) headers["X-Session-Password"] = session.desktop_password;
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+
+  const response = await fetch("/api" + path, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = typeof data.detail === "string"
+      ? data.detail : `Request failed (${response.status})`;
+    const error = new Error(message); error.status = response.status; throw error;
+  }
+  return data;
+}
+
+function updateClock() {
+  if (!desktopReady) { $("clock").textContent = "Preparing…"; return; }
+  const seconds = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
+  $("clock").textContent =
+    String(Math.floor(seconds / 60)).padStart(2, "0") + ":" +
+    String(seconds % 60).padStart(2, "0");
+  $("clock").style.color = seconds <= 300 ? "#fca5a5" : "#e5e7eb";
+}
+
+function showFeedback(status) {
+  startupGeneration++;
+  desktopReady = false;
+  document.getElementById("startupPanel")?.remove();
+  clearTimeout(pollTimer);
+  clearInterval(clockTimer);
+  $("desktop").src = "about:blank";
+  $("password").textContent = "";
+  $("credentials").hidden = true;
+  $("endTitle").textContent =
+    status === "expired" ? "Your lab time has ended" : "Lab ended";
+  show("feedback");
+}
+
+async function pollStatus() {
+  if (screen !== "lab") return;
+  try {
+    const started = performance.now();
+    const data = await api(`/lab/${session.session_id}`);
+    if (screen !== "lab") return;
+
+    if (data.status === "terminated" || data.status === "expired") {
+      showFeedback(data.status);
+      return;
+    }
+    if (data.status === "starting") {
+      $("clock").textContent = "Preparing…";
+      pollTimer = setTimeout(pollStatus, 5000);
+      return;
+    }
+    if (data.status !== "active") throw new Error("Unknown session status.");
+
+    const duration = Date.parse(data.expires_at) - Date.parse(data.server_time);
+    deadline = started + Math.max(0, duration);
+    updateClock();
+    $("connection").textContent = duration > 0
+      ? "Session active · Changes are temporary"
+      : "Time is up · Waiting for server cleanup…";
+  } catch (error) {
+    if (screen === "lab") {
+      $("connection").textContent =
+        "Unable to confirm session status. Retrying… " + error.message;
+    }
+  }
+  if (screen === "lab") pollTimer = setTimeout(pollStatus, 5000);
+}
+
+function openLab() {
+  desktopReady = false;
+  clearTimeout(pollTimer); clearInterval(clockTimer);
+  show("lab");
+  $("password").textContent = session.desktop_password;
+  $("credentials").hidden = false;
+  $("desktop").src = "about:blank";
+  setTimeout(() => prepareDesktop(), 0);
+  deadline = performance.now() +
+    Math.max(0, Date.parse(session.expires_at) - Date.now());
+  updateClock();
+  clockTimer = setInterval(updateClock, 1000);
+  pollStatus();
+}
+
+$("startForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  $("startButton").disabled = true;
+  $("error").textContent = "";
+  try {
+    session = await api("/sessions", "POST", {
+      access_code: $("classCode").value,
+      request_id: getStartRequestId()
+    });
+    sessionStorage.removeItem("labPendingStart");
+    $("classCode").value = "";
+    saveSession();
+    openLab();
+  } catch (error) {
+    if (error.status === 409) sessionStorage.removeItem("labPendingStart");
+    $("error").textContent = error.message + " You can retry Start Lab; a pending request will reuse the same session.";
+  } finally {
+    $("startButton").disabled = false;
+  }
+});
+
+$("credentialsButton").onclick = () => {
+  $("credentials").hidden = !$("credentials").hidden;
+};
+
+$("fullscreenButton").onclick = async () => {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await $("lab").requestFullscreen();
+  } catch {
+    $("connection").textContent = "Fullscreen is unavailable in this browser.";
+  }
+};
+
+$("endButton").onclick = async () => {
+  if (ending || !confirm("End this lab? All session files and changes will be deleted.")) return;
+  ending = true;
+  $("endButton").disabled = true;
+  $("connection").textContent = "Ending your session…";
+  try {
+    const data = await api(`/lab/${session.session_id}/terminate`, "POST");
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => {});
+    }
+    showFeedback(data.status);
+  } catch (error) {
+    $("connection").textContent =
+      "Could not confirm termination. You can retry. " + error.message;
+  } finally {
+    ending = false;
+    $("endButton").disabled = false;
+  }
+};
+
+$("feedbackForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  $("submitFeedback").disabled = true;
+  $("skipFeedback").disabled = true;
+  $("feedbackMessage").textContent = "";
+  try {
+    await api(`/lab/${session.session_id}/feedback`, "POST", {
+      rating: Number($("rating").value),
+      worked: $("worked").value,
+      comments: $("comments").value
+    });
+    $("feedbackForm").hidden = true;
+    $("feedbackMessage").textContent = "Thank you! Your feedback has been saved.";
+    $("returnButton").hidden = false;
+    try { sessionStorage.removeItem(storageKey); } catch {}
+  } catch (error) {
+    $("feedbackMessage").textContent = "Feedback was not saved: " + error.message;
+  } finally {
+    $("submitFeedback").disabled = false;
+    $("skipFeedback").disabled = false;
+  }
+});
+
+function returnToStart() {
+  try { sessionStorage.removeItem(storageKey); } catch {}
+  location.reload();
+}
+
+$("skipFeedback").onclick = returnToStart;
+$("returnButton").onclick = returnToStart;
+
+try {
+  const saved = JSON.parse(sessionStorage.getItem(storageKey));
+  if (saved && /^[0-9a-f]{32}$/.test(saved.session_id) &&
+      typeof saved.desktop_password === "string" &&
+      Number.isFinite(Date.parse(saved.expires_at))) {
+    session = saved;
+    openLab();
+  }
+} catch {}
+</script>
+
+<!-- LAB_RESUME_V1 -->
+<script>
+const resumeSection = document.createElement("section");
+resumeSection.style =
+  "margin-top:28px;padding-top:22px;border-top:1px solid #475569";
+resumeSection.innerHTML = `
+  <h2 style="font-size:21px;margin-top:0">Resume existing lab</h2>
+  <p class="muted">
+    Disconnected or closed your tab? Use your saved session ID and password.
+    Your original time limit still applies.
+  </p>
+  <form id="resumeForm">
+    <label for="resumeId">Session ID</label>
+    <input id="resumeId" required autocomplete="off"
+      pattern="[0-9a-fA-F]{32}" maxlength="32"
+      placeholder="Your 32-character session ID">
+    <label for="resumePassword">Session password</label>
+    <input id="resumePassword" type="password"
+      required autocomplete="off">
+    <button id="resumeButton">Resume Lab</button>
+    <p id="resumeMessage" role="status"></p>
+  </form>
+`;
+$("entry").appendChild(resumeSection);
+
+const sessionDetails = document.createElement("div");
+sessionDetails.style = "margin-top:10px";
+sessionDetails.innerHTML = `
+  <div>Session ID: <code id="visibleSessionId"></code></div>
+  <button type="button" id="copyLogin"
+    class="secondary" style="margin-top:10px">
+    Copy login details
+  </button>
+  <span id="copyLoginMessage" role="status"></span>
+`;
+$("credentials").appendChild(sessionDetails);
+
+const reconnectButton = document.createElement("button");
+reconnectButton.id = "reconnectButton";
+reconnectButton.type = "button";
+reconnectButton.className = "secondary";
+reconnectButton.textContent = "Reconnect Desktop";
+$("lab").querySelector("header .actions").prepend(reconnectButton);
+
+function updateSessionDetails() {
+  $("visibleSessionId").textContent = session ? session.session_id : "";
+}
+
+const originalOpenLab = openLab;
+openLab = function() {
+  clearTimeout(pollTimer);
+  clearInterval(clockTimer);
+  originalOpenLab();
+  updateSessionDetails();
+};
+
+updateSessionDetails();
+
+$("copyLogin").onclick = async () => {
+  if (!session) return;
+
+  const details = [
+    "Linux Practice Lab",
+    "Resume page: " + location.origin + "/",
+    "Session ID: " + session.session_id,
+    "Password: " + session.desktop_password,
+    "Desktop username: student",
+    "Expires: " + new Date(session.expires_at).toLocaleString()
+  ].join("\n");
+
+  try {
+    await navigator.clipboard.writeText(details);
+    $("copyLoginMessage").textContent =
+      " Copied. Keep these details private.";
+  } catch {
+    $("copyLoginMessage").textContent =
+      " Clipboard unavailable. Copy the displayed ID and password manually.";
+  }
+};
+
+$("resumeForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  $("resumeButton").disabled = true;
+  $("resumeMessage").textContent = "Checking your session…";
+
+  const token = $("resumeId").value.trim().toLowerCase();
+  const password = $("resumePassword").value;
+
+  try {
+    const response = await fetch(`/api/lab/${token}`, {
+      headers: {"X-Session-Password": password},
+      cache: "no-store",
+      signal: AbortSignal.timeout(20000)
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(
+        typeof data.detail === "string"
+          ? data.detail
+          : `Could not check session (${response.status}).`
+      );
+    }
+
+    if (!["starting", "active", "expired", "terminated"].includes(data.status)) {
+      throw new Error("Unexpected session status. Please contact your instructor.");
+    }
+
+    session = {
+      session_id: token,
+      desktop_username: "student",
+      desktop_password: password,
+      desktop_url: location.origin + `/s/${token}/`,
+      expires_at: data.expires_at, status: data.status
+    };
+
+    saveSession();
+    $("resumePassword").value = "";
+    $("resumeMessage").textContent = "";
+
+    if (!["active", "starting"].includes(data.status)) {
+      showFeedback(data.status);
+      return;
+    }
+
+    openLab();
+  } catch (error) {
+    $("resumeMessage").textContent = error.message;
+  } finally {
+    $("resumeButton").disabled = false;
+  }
+});
+
+let reconnectingDesktop = false;
+
+async function reconnectDesktop() {
+  if (!session || screen !== "lab" || reconnectingDesktop || ending) return;
+
+  reconnectingDesktop = true;
+  reconnectButton.disabled = true;
+
+  try {
+    $("connection").textContent = "Checking session before reconnecting…";
+
+    const data = await api(`/lab/${session.session_id}`);
+
+    if (screen !== "lab" || ending) return;
+
+    if (data.status === "expired" || data.status === "terminated") {
+      showFeedback(data.status);
+      return;
+    }
+
+    if (!["active", "starting"].includes(data.status)) {
+      throw new Error("Session is not available.");
+    }
+
+    // Reload the same desktop. No session-creation request is made.
+    prepareDesktop();
+
+    $("connection").textContent =
+      "Desktop reconnection requested. Your original expiry time is unchanged.";
+  } catch (error) {
+    if (screen === "lab") {
+      $("connection").textContent =
+        "Reconnection failed. Try Reconnect Desktop again. " + error.message;
+    }
+  } finally {
+    reconnectingDesktop = false;
+    reconnectButton.disabled = false;
+  }
+}
+
+reconnectButton.onclick = reconnectDesktop;
+
+window.addEventListener("offline", () => {
+  if (screen === "lab") {
+    $("connection").textContent =
+      "Internet disconnected. Your session time continues on the server.";
+  }
+});
+
+window.addEventListener("online", () => {
+  reconnectDesktop();
+});
+</script>
+
+
+<!-- LAB_IDLE_V1 -->
+<script>
+const idleBanner = document.createElement("div");
+idleBanner.hidden = true;
+idleBanner.style =
+  "padding:12px 18px;background:#78350f;color:white;flex-shrink:0";
+idleBanner.innerHTML = `
+  <strong>Are you still there?</strong>
+  <span id="idleMessage"></span>
+  <button id="continueLab" type="button"
+    style="margin-left:12px">Continue Lab</button>
+`;
+$("lab").insertBefore(idleBanner, $("desktop"));
+
+const boundIdleDocuments = new WeakSet();
+let idleRequestBusy = false;
+let idleLastSent = 0;
+let idlePendingInput = false;
+let idleSessionToken = null;
+let idleStatusBusy = false;
+let idleDisplayDeadline = null;
+
+function applyIdleStatus(data) {
+  if (screen !== "lab") return;
+
+  if (data.status === "expired" || data.status === "terminated") {
+    showFeedback(data.status);
+    if (data.end_reason === "inactivity") {
+      $("endTitle").textContent = "Lab ended due to inactivity";
+    }
+    return;
+  }
+
+  idleBanner.hidden = !data.warning;
+  idleDisplayDeadline = data.warning
+    ? performance.now() + data.seconds_until_close * 1000
+    : null;
+
+  if (data.monitor_note) {
+    idleBanner.hidden = false;
+    $("idleMessage").textContent = " " + data.monitor_note;
+    idleBanner.querySelector("strong").textContent = "Session activity:";
+    $("continueLab").hidden = true;
+  } else {
+    idleBanner.querySelector("strong").textContent = "Are you still there?";
+    $("continueLab").hidden = false;
+  }
+}
+
+async function sendIdleActivity(force = false) {
+  if (!session || !desktopReady || screen !== "lab" || ending || idleRequestBusy) return;
+  if (!force && (!idlePendingInput || Date.now() - idleLastSent < 10000)) return;
+
+  const token = session.session_id;
+  idleRequestBusy = true;
+  idlePendingInput = false;
+  idleLastSent = Date.now();
+
+  try {
+    const data = await api(`/lab/${token}/activity`, "POST");
+    if (session?.session_id === token) applyIdleStatus(data);
+  } catch {
+    idlePendingInput = true;
+    if (screen === "lab") {
+      $("connection").textContent =
+        "Activity could not reach the server. Check your connection.";
+    }
+  } finally {
+    idleRequestBusy = false;
+  }
+}
+
+function onLabInput(event) {
+  if (!event.isTrusted || !desktopReady || screen !== "lab") return;
+  idlePendingInput = true;
+  sendIdleActivity();
+}
+
+function bindDesktopActivity() {
+  if (!desktopReady || screen !== "lab") return;
+
+  try {
+    const win = $("desktop").contentWindow;
+    const doc = win.document;
+
+    // Skip the empty document used before or after a desktop session.
+    if (!doc.location.pathname.startsWith("/s/")) return;
+    if (boundIdleDocuments.has(doc)) return;
+
+    boundIdleDocuments.add(doc);
+
+    // Window capture detects keyboard input before desktop handlers consume it.
+    for (const name of [
+      "keydown", "pointerdown", "pointermove", "wheel", "touchstart"
+    ]) {
+      win.addEventListener(name, onLabInput, {
+        capture: true,
+        passive: true
+      });
+    }
+  } catch {
+    $("connection").textContent =
+      "Desktop activity tracking is unavailable. Use Continue Lab or reconnect.";
+  }
+}
+
+$("continueLab").onclick = () => {
+  idlePendingInput = true;
+  sendIdleActivity(true);
+};
+
+// Count genuine interaction with the lab toolbar too.
+$("lab").querySelector("header").addEventListener(
+  "pointerdown", onLabInput, {capture:true, passive:true}
+);
+
+const openLabBeforeIdle = openLab;
+openLab = function() {
+  openLabBeforeIdle();
+  idleSessionToken = session.session_id;
+  idlePendingInput = true;
+  idleLastSent = 0;
+  sendIdleActivity(true);
+};
+
+const feedbackBeforeIdle = showFeedback;
+showFeedback = function(status) {
+  idleBanner.hidden = true;
+  idleDisplayDeadline = null;
+  feedbackBeforeIdle(status);
+
+  const token = session?.session_id;
+  if (!token) return;
+
+  api(`/lab/${token}/activity`).then(data => {
+    if (screen === "feedback" && session?.session_id === token &&
+        data.end_reason === "inactivity") {
+      $("endTitle").textContent = "Lab ended due to inactivity";
+    }
+  }).catch(() => {});
+};
+
+setInterval(() => {
+  if (screen !== "lab" || !session) return;
+
+  if (idleSessionToken !== session.session_id) {
+    idleSessionToken = session.session_id;
+    idlePendingInput = true;
+    idleLastSent = 0;
+    sendIdleActivity(true);
+  }
+
+  bindDesktopActivity();
+  sendIdleActivity();
+
+  if (idleDisplayDeadline !== null && !idleBanner.hidden &&
+      !$("continueLab").hidden) {
+    const remaining = Math.max(
+      0, Math.ceil((idleDisplayDeadline - performance.now()) / 1000)
+    );
+    $("idleMessage").textContent = remaining > 0
+      ? ` Your lab will close in ${remaining} seconds without activity.`
+      : " Waiting for the server to confirm session status…";
+  }
+}, 1000);
+
+setInterval(async () => {
+  if (screen !== "lab" || !session || idleStatusBusy) return;
+
+  const token = session.session_id;
+  idleStatusBusy = true;
+
+  try {
+    const data = await api(`/lab/${token}/activity`);
+    if (session?.session_id === token) applyIdleStatus(data);
+  } catch {
+    // Existing connection/status UI handles unavailable API requests.
+  } finally {
+    idleStatusBusy = false;
+  }
+}, 5000);
+</script>
+
+
+<script>
+function getStartRequestId() {
+  let id = sessionStorage.getItem("labPendingStart");
+  if (!id) {
+    id = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+      b => b.toString(16).padStart(2,"0")).join("");
+    sessionStorage.setItem("labPendingStart", id);
+  }
+  return id;
+}
+
+// Canvas pixel evidence is used instead of iframe.onload, which also fires on 502s.
+function hasDesktopPicture() {
+  try {
+    const doc = $("desktop").contentDocument;
+    if (!doc || !doc.location.pathname.startsWith("/s/")) return false;
+    for (const video of doc.querySelectorAll("video")) {
+      if (video.readyState >= 2 && video.videoWidth > 0 && video.currentTime > 0) return true;
+    }
+    for (const canvas of doc.querySelectorAll("canvas")) {
+      if (canvas.width < 320 || canvas.height < 200) continue;
+      const sample = document.createElement("canvas");
+      sample.width = 32; sample.height = 24;
+      const ctx = sample.getContext("2d", {willReadFrequently:true});
+      ctx.drawImage(canvas,0,0,32,24);
+      const pixels = ctx.getImageData(0,0,32,24).data;
+      let variation = 0;
+      for (let i=4;i<pixels.length;i+=4) {
+        if (Math.abs(pixels[i]-pixels[0])+Math.abs(pixels[i+1]-pixels[1])+
+            Math.abs(pixels[i+2]-pixels[2]) > 45) variation++;
+      }
+      if (variation > 40) return true;
+    }
+  } catch {}
+  return false;
+}
+
+async function prepareDesktop() {
+  const generation = ++startupGeneration;
+  desktopReady = false;
+  $("credentials").hidden = false;
+  $("desktop").src = "about:blank";
+  $("desktop").style.opacity = "0";
+  $("desktop").style.pointerEvents = "none";
+  $("clock").textContent = "Preparing…";
+  document.getElementById("startupPanel")?.remove();
+  const panel = document.createElement("div");
+  panel.id = "startupPanel";
+  panel.style = "position:absolute;z-index:20;bottom:24px;left:50%;transform:translateX(-50%);width:min(480px,92vw);padding:24px;border:1px solid #475569;border-radius:18px;background:#172033;box-shadow:0 12px 60px #0008";
+  panel.innerHTML = `<h2 style="margin-top:0"><span class="spinner" aria-hidden="true"></span> Preparing your Linux lab…</h2>
+    <p id="startupStep" role="status">Waiting for the desktop service.</p>
+    <p id="startupQuote" style="color:#93c5fd"></p>
+    <p class="muted">New lab timers begin once the desktop is ready. Resumed labs keep their original expiry.</p>
+    <div class="actions"><button id="startupRetry" class="secondary">Retry connection</button>
+    <button id="startupPreview" class="secondary" hidden>Preview desktop</button>
+    <button id="startupConfirm" hidden>Desktop visible — Start lab</button></div>`;
+  $("lab").style.position = "relative";
+  $("lab").appendChild(panel);
+  const quotes = ["Every command you practise builds confidence.",
+    "Experiment, make mistakes, and learn.",
+    "Small steps today build strong skills tomorrow.",
+    "You do not need to know everything to begin."];
+  const began = performance.now();
+  let loaded = false, serviceWasReady = false, activating = false, visualSamples = 0;
+  const valid = () => generation === startupGeneration && screen === "lab";
+  $("startupRetry").onclick = () => prepareDesktop();
+  $("startupPreview").onclick = () => {
+    $("desktop").style.opacity = "1";
+    $("desktop").style.pointerEvents = "auto";
+    $("startupConfirm").hidden = false;
+    $("startupStep").textContent = "If you can see and use the desktop, click Start lab. Otherwise retry the connection.";
+  };
+  async function finish() {
+    if (!valid() || activating || !serviceWasReady) return;
+    activating = true;
+    try {
+      const data = await api(`/lab/${session.session_id}/activate`,"POST");
+      if (!valid()) return;
+      session = {...session,...data}; saveSession();
+      desktopReady = true;
+      $("desktop").style.opacity = "1";
+      $("desktop").style.pointerEvents = "auto";
+      panel.remove();
+      $("credentials").hidden = true;
+      deadline = performance.now()+Math.max(0,Date.parse(data.expires_at)-Date.parse(data.server_time));
+      updateClock();
+      idlePendingInput = true;
+      sendIdleActivity(true);
+    } catch (error) {
+      if (valid()) $("startupStep").textContent = error.message;
+    } finally { activating = false; }
+  }
+  $("startupConfirm").onclick = finish;
+  let nextProbe = 0;
+  while (valid() && !desktopReady) {
+    $("startupQuote").textContent = quotes[Math.floor((performance.now()-began)/10000)%quotes.length];
+    if (performance.now() >= nextProbe) {
+      nextProbe = performance.now()+3000;
+      try {
+        const data = await api(`/lab/${session.session_id}/ready`);
+        if (!valid()) return;
+        if (!["starting","active"].includes(data.status)) { showFeedback(data.status); return; }
+        serviceWasReady = data.service_ready;
+        if (serviceWasReady && !loaded) {
+          loaded = true;
+          $("desktop").src = `/s/${session.session_id}/?connect=${Date.now()}`;
+          $("startupStep").textContent = "Sign in with the credentials above if prompted. Waiting for the desktop picture…";
+        }
+      } catch (error) {
+        if (valid()) $("startupStep").textContent = "Waiting for connection. " + error.message;
+      }
+    }
+    if (!valid()) return;
+    if (loaded) {
+      // Retry explicit gateway error documents, without interrupting a login prompt.
+      try {
+        const doc = $("desktop").contentDocument;
+        if (/^(502 Bad Gateway|503 Service Unavailable|504 Gateway Time-out)$/i.test(doc?.title.trim() || "")) {
+          loaded = false; visualSamples = 0;
+          $("desktop").src = "about:blank";
+          $("startupStep").textContent = "Desktop gateway is warming up. Retrying…";
+        }
+      } catch {}
+      visualSamples = hasDesktopPicture() ? visualSamples+1 : 0;
+      if (visualSamples >= 2) await finish();
+      if (!valid() || desktopReady) return;
+      if (performance.now()-began > 20000) $("startupPreview").hidden = false;
+    }
+    await new Promise(resolve => setTimeout(resolve,1000));
+  }
+}
+</script>
+
+</body>
+</html>

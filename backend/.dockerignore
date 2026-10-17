@@ -1,0 +1,6 @@
+.env
+.env.*
+data/
+nginx/sessions/
+__pycache__/
+startup-backup-*/
