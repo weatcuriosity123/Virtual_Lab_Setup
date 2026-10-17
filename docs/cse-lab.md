@@ -1,4 +1,4 @@
-# CSE lab template plan — not yet built
+# CSE lab template — candidate recipe, Pi validation pending
 
 The current image is a custom `linux-lab:1.0` desktop. Do not replace the working
 classroom template before the new image passes desktop and practical tests.
@@ -54,3 +54,44 @@ Sources:
 - https://developer.android.com/studio/install
 - https://code.visualstudio.com/docs/setup/linux
 - https://docs.linuxserver.io/images/docker-webtop/
+
+## Build on the Pi
+
+From the repository root, with no running student labs:
+
+```bash
+bash scripts/build-cse-image.sh
+```
+
+This pulls the Debian XFCE base, resolves its digest, and builds a separate
+`linux-lab:cse-candidate`. The build runs command-line smoke checks and records
+package versions in `/opt/cse-lab/packages.tsv`. No API deployment or template
+switch is performed. The original `linux-lab:1.0` remains available.
+
+This recipe has not been built in the assistant environment (no Docker daemon).
+Successful syntax review is not evidence of package download/build or GUI success.
+Send the final build output before registering a classroom template.
+
+## After the build succeeds
+
+Register a candidate for a private, one-student test using the existing CLI:
+
+```bash
+cd ~/linux-lab/backend
+docker compose exec api python classrooms.py template-add cse-candidate-v1 \
+  --name "CSE Programming (candidate)" --image linux-lab:cse-candidate \
+  --memory-mb 1536 --cpu-millis 1500 --shm-mb 256 --home-mb 512 --pids 512
+```
+
+These limits are an initial experiment, not a verified capacity specification.
+The tmpfs home consumes memory within the container budget. Create a separate
+one-slot test classroom and enroll only the test operator. Do not assign real
+students yet or change `STUDENT_IMAGE` globally. Shared template choices become
+visible to college admins once registered; coordinate the candidate test.
+
+Verify: desktop readiness/authentication, `cse-smoke` as the student, VS Code
+editing/terminal, Java compilation, Wireshark launch and offline PCAP opening,
+GitHub CLI presence (no account needed), resume, inactivity warning, termination
+and feedback. Observe `docker stats` on the Pi during these exercises. If upstream
+Selkies behavior or sandboxing differs, resolve it before promotion; do not weaken
+security flags to get a quick pass. Android tooling is a separate x86-64 milestone.
