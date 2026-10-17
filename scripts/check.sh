@@ -16,4 +16,5 @@ for page in Path('backend/frontend').glob('*.html'):
 Path(sys.argv[1]).write_text('\n'.join(scripts))
 PY
 node --check "$js_file"
+node tests/test_logout.cjs
 printf 'Python lifecycle and JavaScript syntax checks passed.\n'

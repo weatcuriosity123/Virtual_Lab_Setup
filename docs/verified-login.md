@@ -109,3 +109,25 @@ admin authorization on subsequent requests.
 
 The dashboard is available at `/admin`. Admin status does not bypass classroom
 enrollment or session ownership for student lab access. See [Admin dashboard](admin.md).
+
+## Logout
+
+The student portal and admin dashboard have a Log out button. It clears the
+portal's saved session credentials and pending-start ID, removes the desktop
+iframe, notifies other open same-origin portal tabs, and navigates to
+`/cdn-cgi/access/logout`. The endpoint is served by Cloudflare, not FastAPI.
+
+Logout does not terminate containers or pause their timers. Use End Lab and
+submit feedback before signing out when finished. To resume later, keep the
+session ID/password and sign in with the same enrolled identity before expiry.
+Browser tabs outside the portal and identity-provider sessions are not managed
+by our frontend. Existing Google/Microsoft sign-in may allow quick reauthentication.
+
+Cloudflare documents that logout revokes Access sessions across applications
+on the team, clears the application cookie immediately, and previously issued
+tokens stop being accepted within 20–30 seconds. See
+https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/
+
+Verify on deployment: open portal and admin tabs, click Log out, confirm both
+leave their views, then revisit the portal and authenticate. Verify that saved
+credentials are cleared and that End Lab/feedback still work before logout.

@@ -3,7 +3,7 @@
 <style>
 :root{color-scheme:dark;font:15px system-ui;background:#0b1220;color:#e5edf8}body{margin:0}header{padding:26px 5%;border-bottom:1px solid #28354b;display:flex;justify-content:space-between;align-items:center}h1{font-size:26px;margin:4px 0}h2{font-size:19px}small,.hint{color:#a6b5ca}a{color:#77d8cc}main{max-width:1300px;margin:auto;padding:24px}section{background:#111d30;border:1px solid #28354b;border-radius:14px;padding:22px;margin-bottom:20px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:20px}form{display:grid;gap:12px}label{display:grid;gap:5px}input,select,textarea,button{font:inherit;padding:10px;border:1px solid #40516c;border-radius:7px;background:#0c1729;color:inherit;min-width:0}button{cursor:pointer;background:#185b56;border-color:#318f83}button:hover{background:#23776f}button:disabled{opacity:.5;cursor:wait}.danger{background:#783541}.table{overflow:auto}table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:12px 9px;border-bottom:1px solid #28354b;vertical-align:top;overflow-wrap:anywhere}th{color:#a6b5ca}td button{padding:6px 10px;margin:2px}#notice{padding:14px;background:#20334c;border-radius:8px;margin-bottom:20px;white-space:pre-wrap}.error{color:#ffb5ba}#content[hidden]{display:none}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px}#summary{font-size:18px}p{line-height:1.5}footer{color:#a6b5ca;padding:10px 0 30px}
 </style></head><body>
-<header><div><small>LINUX LAB / CONTROL PANEL</small><h1>Administration</h1><span id="account">Checking access…</span></div><a href="/">Student portal ↗</a></header>
+<header><div><small>LINUX LAB / CONTROL PANEL</small><h1>Administration</h1><span id="account">Checking access…</span></div><div><a href="/">Student portal ↗</a> <button type="button" data-logout>Log out</button></div></header>
 <main><div id="notice" role="status">Verifying your administrator account…</div><div id="content" hidden>
 <section class="toolbar"><div id="summary"></div><button id="refresh">Refresh</button></section>
 <div class="grid"><section id="createCollegeSection" hidden><h2>Create college</h2><form id="college"><label>College ID (saved in lowercase)<input name="id" placeholder="pccoer" pattern="[a-zA-Z0-9][a-zA-Z0-9\-]{0,63}" title="Use 1–64 letters, numbers or hyphens. IDs are saved in lowercase." required></label><label>College name<input name="name" maxlength="120" required></label><button>Create college</button></form></section>
@@ -36,4 +36,39 @@ async function run(action){if(busy)return;busy=true;document.querySelectorAll('b
 function form(id,action){$(id).onsubmit=e=>{e.preventDefault();run(async()=>{const result=await action(Object.fromEntries(new FormData(e.target)));e.target.reset();return result;});};}
 form('assignAdmin',data=>api('colleges/'+encodeURIComponent(data.college)+'/admins',{email:data.email,enabled:true}));form('college',data=>api('colleges',data));form('classroom',data=>api('classrooms',{...data,session_minutes:Number(data.session_minutes),max_sessions:Number(data.max_sessions)}));form('member',async data=>{const result=await api('classrooms/'+encodeURIComponent(data.classroom)+'/members/bulk',{emails:data.emails});return 'Enrollment saved: '+result.added+' added, '+result.reenabled+' re-enabled, '+result.unchanged+' already enrolled, '+result.duplicates+' duplicates ignored.';});$('refresh').onclick=()=>run(async()=>{});
 (async()=>{try{const me=await api('me');$('account').textContent=me.email+' · '+(me.platform_admin?'Platform administrator':'College administrator');await load();$('content').hidden=false;notice('Ready. Changes apply when you submit a form or use an action button.');}catch(e){$('account').textContent='Access unavailable';notice(e.message,true);}})();
-</script></body></html>
+</script>
+<script>
+// Logout clears this application's credentials and disconnects other open portal tabs.
+(function () {
+  let leaving = false;
+  const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('linux-lab-auth') : null;
+  function leave() {
+    if (leaving) return;
+    leaving = true;
+    window.labSigningOut = true;
+    try {
+      sessionStorage.removeItem('linuxLabSession');
+      sessionStorage.removeItem('labPendingStart');
+    } catch {}
+    document.querySelectorAll('iframe').forEach(frame => frame.remove());
+    document.body.replaceChildren();
+    const message = document.createElement('p');
+    message.textContent = 'Signing out…';
+    document.body.append(message);
+    window.location.replace('/cdn-cgi/access/logout');
+  }
+  document.querySelectorAll('[data-logout]').forEach(button => {
+    button.addEventListener('click', () => {
+      if (!window.confirm('Sign out? Running labs keep their existing timers. Use End Lab first to finish and submit feedback. Saved lab credentials will be cleared, so keep your session ID and password if you plan to resume. This also signs you out of other Cloudflare Access apps on this team.')) return;
+      try { channel?.postMessage('logout'); } catch {}
+      try { localStorage.setItem('linuxLabLogout', String(Date.now())); } catch {}
+      leave();
+    });
+  });
+  if (channel) channel.onmessage = event => { if (event.data === 'logout') leave(); };
+  window.addEventListener('storage', event => {
+    if (event.key === 'linuxLabLogout' && event.newValue) leave();
+  });
+})();
+</script>
+</body></html>

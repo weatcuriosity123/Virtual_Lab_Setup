@@ -40,6 +40,7 @@ iframe{width:100%;flex:1;min-height:0;border:0;background:#111}
   Active lab timers continue while disconnected.
 </div>
 
+<div id="logoutBar" hidden style="padding:8px 16px;text-align:right"><button type="button" data-logout class="secondary">Log out</button></div>
 <section id="entry" class="card">
   <h1>Linux Practice Lab</h1>
   <p id="accountInfo" class="muted"></p>
@@ -126,6 +127,7 @@ function show(name) {
 }
 
 function saveSession() {
+  if (window.labSigningOut) return;
   try {
     sessionStorage.setItem(storageKey, JSON.stringify(session));
   } catch {
@@ -844,8 +846,44 @@ async function prepareDesktop() {
 
 <script>
 api("/me").then(data => {
+  $("logoutBar").hidden = data.auth_mode !== "cloudflare";
   if (data.email) $("accountInfo").textContent = "Signed in as " + data.email;
 }).catch(() => {});
+</script>
+
+<script>
+// Logout clears this application's credentials and disconnects other open portal tabs.
+(function () {
+  let leaving = false;
+  const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('linux-lab-auth') : null;
+  function leave() {
+    if (leaving) return;
+    leaving = true;
+    window.labSigningOut = true;
+    try {
+      sessionStorage.removeItem('linuxLabSession');
+      sessionStorage.removeItem('labPendingStart');
+    } catch {}
+    document.querySelectorAll('iframe').forEach(frame => frame.remove());
+    document.body.replaceChildren();
+    const message = document.createElement('p');
+    message.textContent = 'Signing out…';
+    document.body.append(message);
+    window.location.replace('/cdn-cgi/access/logout');
+  }
+  document.querySelectorAll('[data-logout]').forEach(button => {
+    button.addEventListener('click', () => {
+      if (!window.confirm('Sign out? Running labs keep their existing timers. Use End Lab first to finish and submit feedback. Saved lab credentials will be cleared, so keep your session ID and password if you plan to resume. This also signs you out of other Cloudflare Access apps on this team.')) return;
+      try { channel?.postMessage('logout'); } catch {}
+      try { localStorage.setItem('linuxLabLogout', String(Date.now())); } catch {}
+      leave();
+    });
+  });
+  if (channel) channel.onmessage = event => { if (event.data === 'logout') leave(); };
+  window.addEventListener('storage', event => {
+    if (event.key === 'linuxLabLogout' && event.newValue) leave();
+  });
+})();
 </script>
 </body>
 </html>
