@@ -15,6 +15,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && printf '%s\n' 'wireshark-common wireshark-common/install-setuid boolean false' \
        'code code/add-microsoft-repo boolean false' | debconf-set-selections \
     && apt-get update \
+    && mkdir -p /usr/share/man/man1 \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        code build-essential cmake gdb \
        python3 python3-pip python3-venv python3-numpy python3-pandas python3-matplotlib \

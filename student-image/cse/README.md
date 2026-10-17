@@ -26,3 +26,7 @@ new versions. Preserve the validated image by digest/archive for the pilot.
 
 The current Webtop base uses NodeSource Node.js. Its package provides npm; do not
 install Debian's separate npm package alongside it. The build checks both commands.
+
+The recipe creates `/usr/share/man/man1` before installing the JDK. The slim
+base can omit that directory, causing Java post-install `update-alternatives`
+to fail when creating its manual-page link and leaving Maven/JDK unconfigured.
