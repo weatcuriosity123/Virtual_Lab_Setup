@@ -219,17 +219,61 @@ async def expiry_worker():
             print(f"Expiry worker error: {exc}", flush=True)
 
 
+def reconcile_sessions():
+    """Single-worker startup recovery. Never delete volumes or restart desktops."""
+    now = datetime.now(timezone.utc)
+    # A Docker outage must fail startup, not be mistaken for missing containers.
+    containers = docker_client.containers.list(all=True, filters={"label": "linux-lab.managed=true"})
+    managed = {}
+    for container in containers:
+        token = (container.labels or {}).get("linux-lab.session", "")
+        if (not re.fullmatch(r"[0-9a-f]{32}", token) or
+                container.name != f"linux-lab-session-{token}"):
+            raise RuntimeError("Managed container ownership mismatch; inspect Docker labels before restarting API.")
+        managed[token] = container
+    with closing(connect_db()) as db:
+        rows = {row["token"]: row for row in db.execute("SELECT * FROM sessions")}
+        # Validate the whole inventory before performing cleanup.
+        for token, row in rows.items():
+            if (not re.fullmatch(r"[0-9a-f]{32}", token) or
+                    row["container_name"] != f"linux-lab-session-{token}"):
+                raise RuntimeError("Session container mapping is invalid; recovery stopped.")
+        retained = set()
+        ended = removed = 0
+        for token, container in managed.items():
+            row = rows.get(token)
+            container.reload()
+            live = (row is not None and row["status"] in ("starting", "active") and
+                    datetime.fromisoformat(row["expires_at"]) > now)
+            if live and container.status == "running":
+                write_route(token, container.name)
+                retained.add(token)
+                continue
+            # Includes orphan containers left between Docker creation and DB commit.
+            # v=False explicitly retains all volumes, including saved student homes.
+            try:
+                container.stop(timeout=5)
+                container.remove(force=True, v=False)
+            except NotFound:
+                pass
+            removed += 1
+        for token, row in rows.items():
+            if row["status"] in ("starting", "active") and token not in retained:
+                db.execute("UPDATE sessions SET status='expired' WHERE token=?", (token,))
+                ended += 1
+        db.commit()
+    for route in CONFIG_DIR.glob("*.conf"):
+        if re.fullmatch(r"[0-9a-f]{32}", route.stem) and route.stem not in retained:
+            route.unlink(missing_ok=True)
+    reload_proxy()
+    print(f"Session recovery: retained={len(retained)} ended={ended} removed={removed}", flush=True)
+
+
 @app.on_event("startup")
 async def startup():
     identity.validate_config()
     init_db()
-    cleanup_expired()
-    # Existing routes must use the same ownership gate as newly created routes.
-    with closing(connect_db()) as db:
-        routes = db.execute("SELECT token,container_name FROM sessions WHERE status IN ('starting','active')").fetchall()
-    for row in routes:
-        write_route(row["token"], row["container_name"])
-    reload_proxy()
+    reconcile_sessions()
     app.state.expiry_task = asyncio.create_task(expiry_worker())
 
 

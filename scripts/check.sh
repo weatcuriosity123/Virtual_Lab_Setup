@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 python3 -m py_compile backend/main.py
 python3 tests/test_lifecycle.py
+python3 tests/test_recovery.py
 python3 tests/test_classrooms.py
 python3 tests/test_storage.py
 python3 tests/test_quota_agent.py

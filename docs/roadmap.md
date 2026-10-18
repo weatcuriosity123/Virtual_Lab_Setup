@@ -19,10 +19,12 @@ feedback, platform admin dashboard, bulk enrollment, admin activity history.
    isolation validation remain required. Hard-quota pool integration is implemented
    with local tests; the Pi deployment, in-container hard quota and saved-file
    recovery after reboot passed on 2026-10-18. Cold backup and isolated recovery
-   drill tooling is implemented; its host acceptance and full replacement-host
-   recovery remain pending. See [backup-recovery.md](backup-recovery.md).
-4. **Reliability and isolation: pending.** Reconcile after restarts, harden cleanup,
-   network isolation and monitoring, and prove backup recovery.
+   drill passed on the Pi; a Windows off-device archive was checksum-verified.
+   Full replacement-host recovery and recurring backup operations remain pending. See [backup-recovery.md](backup-recovery.md).
+4. **Reliability and isolation: in progress.** Startup session reconciliation is
+   implemented and locally tested; complete [restart acceptance](restart-recovery.md).
+   Runtime reconciliation, network isolation, monitoring and whole-host recovery
+   remain pending.
 5. **Capacity validation: pending.** Measure concurrent desktop workloads and
    establish supported student counts for each server and template.
 6. **Pilot acceptance and launch: pending.** Run a real college practical, resolve
