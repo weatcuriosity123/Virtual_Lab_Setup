@@ -118,7 +118,7 @@ def backup(backend, destination):
         target = destination / 'backend'
         target.mkdir()
         # Explicit runtime inputs; do not recurse into old deployment backups.
-        for name in ('Dockerfile', 'requirements.txt', 'docker-compose.yml', 'docker-compose.override.yml', '.env'):
+        for name in ('Dockerfile', 'requirements.txt', 'docker-compose.yml', 'docker-compose.override.yml', 'compose.network-isolation.yml', '.env'):
             if (backend / name).exists():
                 shutil.copy2(backend / name, target / name)
         for path in backend.glob('*.py'):
@@ -126,6 +126,11 @@ def backup(backend, destination):
         for name in ('data', 'frontend', 'nginx'):
             run('cp', '-a', '--', str(backend / name), str(target / name))
         shutil.copy2('/usr/local/sbin/linux-lab-storage-agent', destination / 'storage-agent.py')
+        for optional, name in [('/etc/linux-lab-network.json', 'network-config.json'),
+                               ('/usr/local/sbin/linux-lab-network-guard', 'network-guard.py'),
+                               ('/var/lib/linux-lab-network/original.json', 'network-original.json')]:
+            if Path(optional).exists():
+                shutil.copy2(optional, destination / name)
         check_db(destination / 'homes.db')
         check_db(target / 'data/sessions.db')
         metadata = {'format': 1, 'created_at': datetime.now(timezone.utc).isoformat(),

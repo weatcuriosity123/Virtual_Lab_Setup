@@ -12,6 +12,7 @@ import docker
 import classrooms
 import identity
 import storage
+import network_guard
 from docker.errors import DockerException, NotFound
 from fastapi import FastAPI, HTTPException, Request as HttpRequest
 from fastapi.responses import JSONResponse
@@ -348,6 +349,7 @@ async def create_session(request: CreateSession):
         if occupied >= context["max_sessions"]:
             raise HTTPException(429, "All desktops for this classroom are in use. Try again later.")
 
+        network_options = await asyncio.to_thread(network_guard.container_options, DOCKER_NETWORK)
         home_options = await asyncio.to_thread(storage.home_options, docker_client, context, identity.actor(), identity.MODE)
 
         try:
@@ -360,6 +362,7 @@ async def create_session(request: CreateSession):
                 network=DOCKER_NETWORK,
                 shm_size=f"{context['shm_mb']}m",
                 **home_options,
+                **network_options,
                 mem_limit=f"{context['memory_mb']}m",
                 nano_cpus=context["cpu_millis"] * 1_000_000,
                 pids_limit=context["pids"],

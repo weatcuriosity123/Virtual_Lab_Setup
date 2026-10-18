@@ -8,7 +8,8 @@ current shared production bridge is 172.18.0.0/16, containing API and proxy and
 student sessions when running. The host LAN is 192.168.29.0/24. The host has IPv6,
 even though the production Docker network has EnableIPv6=false.
 
-Production isolation is **not implemented by the trial script**. This step proves
+Production isolation is **not implemented by the trial script**; use the persistent
+deployment section below after the trial passes. The trial proves
 the relevant packet paths on the actual kernel before moving live desktops.
 
 ## Disposable trial
@@ -91,3 +92,129 @@ shared production network.
 Reference: https://docs.docker.com/engine/network/firewall-iptables/ describes
 DOCKER-USER and the distinction between Docker forwarding and other host chains.
 The pilot remains on Docker 26's iptables backend; no backend migration is proposed.
+
+## Persistent deployment (single-host quota pilot)
+
+The disposable trial passed on the Pi with explicit public DNS on 2026-10-18.
+Persistent isolation is now implemented, but requires the live acceptance below.
+
+End all labs before deployment. The second step briefly recreates the API/proxy;
+keep your SSH session open. Neither step rebuilds the student image.
+
+```bash
+bash scripts/install-classrooms.sh "$HOME/linux-lab/backend"
+sudo python3 scripts/manage-network-isolation.py install "$HOME/linux-lab/backend"
+```
+
+The installer requires the managed quota Compose override. It adds a separate
+`compose.network-isolation.yml`, selected through COMPOSE_FILE in `.env`; it does
+not replace the quota override. Future ordinary classroom updates retain this
+selection. Do not rerun the quota installer blindly: it intentionally refuses a
+custom COMPOSE_FILE. Review merges when upgrading that host service.
+
+Student network: `linux-lab-students`, bridge `ll-students`, subnet
+172.30.240.0/24, dynamic allocation 172.30.240.128/25. API and proxy additionally
+attach at .2 and .3; their existing control network remains. Conflicting routes
+or networks cause installation refusal. Public DNS 1.1.1.1/8.8.8.8 is configured
+only for new student containers. Their IPv6 is disabled and NET_RAW/NET_ADMIN are
+dropped. Webtop retains its other default Docker capabilities and existing
+no-new-privileges setting. Wireshark can analyse capture files, but live capture,
+raw sockets and network configuration exercises require a separately designed
+restricted lab environment. Do not add capabilities to bypass these restrictions.
+
+The root-only `linux-lab-network.service` installs scoped rules after Docker
+starts and exposes a read-only Unix health endpoint. The API consults it before
+allocating storage/creating a new desktop. Missing guard, changed rule order,
+changed network configuration, unsafe attached endpoints or uncovered host routes
+cause HTTP 503. Existing sessions are not continuously monitored or killed if a
+host administrator manually flushes rules; this is admission protection, not an
+instantaneous firewall-tampering watchdog. Host-root administration is trusted.
+Do not flush rules or change routing while students are working.
+
+Only API/proxy-initiated TCP connections to desktop port 3000 and established
+student replies to those connections are allowed within the student subnet.
+Student-initiated private-network traffic remains blocked even if a connection
+was established during an earlier protection outage. Host INPUT is blocked
+separately. The policy also records existing non-default IPv4 routes; rerun the
+installer with no labs after intentional routing changes. Packet rules persist
+in the kernel if the health service stops. Systemd reinstalls/checks rules after
+boot/Docker start; no student restart policy is enabled. If rules need repair
+while managed containers remain, the service refuses to loosen/replace them:
+end labs, inspect the cause, then rerun installation. Saved volumes are untouched.
+
+### Acceptance and diagnostics
+
+```bash
+systemctl is-active linux-lab-network.service
+sudo python3 /usr/local/sbin/linux-lab-network-guard check
+```
+
+Start one persistent CSE lab. Verify desktop loading, keyboard/mouse, storage
+banner and previous files, a DNS/HTTPS request and your normal programming tools.
+This is the first real Webtop compatibility check for the capability/IPv6 changes.
+If desktop startup fails, send API and student-container logs; do not disable the
+guard or change capabilities as an improvised fix.
+
+From the desktop terminal:
+
+```bash
+python3 - <<'PY'
+import socket
+from urllib.request import urlopen
+for host, port in [('172.30.240.2',8000),('172.30.240.3',80),('172.30.240.1',22)]:
+    try:
+        with socket.create_connection((host,port),timeout=3):
+            print('FAIL: reachable',host,port)
+    except OSError:
+        print('Blocked/unreachable:',host,port)
+print('HTTPS status:',urlopen('https://example.com',timeout=15).status)
+PY
+```
+
+Unreachable checks alone are not proof of firewall enforcement if no service
+listens. Combine them with host rule counters and the already verified controlled
+trial. A two-student actual-desktop test, WebSocket acceptance, admission-failure
+test, Docker restart and host reboot tests remain required before declaring the
+persistent policy accepted. On the 4 GiB Pi use tiny controlled peers for network
+checks rather than raising supported classroom capacity without measurement.
+
+To inspect failures:
+
+```bash
+sudo journalctl -u linux-lab-network.service -n 60 --no-pager
+sudo iptables -nvL LL_STUDENTS
+cd ~/linux-lab/backend
+docker compose logs --tail=60 api
+```
+
+If a partial installation fails, the API may remain stopped deliberately. Inspect
+the error and rerun the installer after resolving it, or use rollback. Never
+manually flush the chain while labs are connected. The service does not change
+SSH rules on the physical interface or global firewall policies.
+
+### Rollback
+
+End all labs first, including starting sessions. From the source checkout:
+
+```bash
+sudo python3 scripts/manage-network-isolation.py rollback "$HOME/linux-lab/backend"
+```
+
+Rollback restores the three original environment settings, recreates API/proxy
+on their previous network, confirms no isolated endpoints remain, then disables
+the guard and removes only its hooks/chain/network. Persistent homes and quota
+service remain. The site will again have the previous **unisolated** network:
+use it only for your own development until protection is reinstated. The saved
+original-settings record is retained for repeat installation. Root-owned guard
+configuration and source files remain for inspection; sysctl bridge filtering
+stays enabled (it was enabled before installation).
+
+### Backup and replacement-host recovery
+
+The updated backup script includes the Compose isolation fragment, installed
+network guard, policy configuration and original-settings record when present.
+The existing Windows archive predates this feature. After acceptance, make and
+transfer a new backup. On a replacement host restore the firewall/network service
+and exact network addressing before enabling student admission. If COMPOSE_FILE
+references the isolation fragment, restoring only the older Compose files is
+insufficient. A whole-host recovery rehearsal is still pending.

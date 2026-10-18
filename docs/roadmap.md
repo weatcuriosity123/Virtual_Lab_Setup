@@ -25,7 +25,9 @@ feedback, platform admin dashboard, bulk enrollment, admin activity history.
    implemented and locally tested; API restart, active-session host reboot,
    capacity cleanup and saved-file recovery passed on the Pi on 2026-10-18.
    See [restart acceptance](restart-recovery.md).
-   Runtime reconciliation, network isolation, monitoring and whole-host recovery
+   Disposable isolation packet tests passed with explicit DNS. Persistent student
+   isolation and guarded admission are implemented; [live acceptance](network-isolation.md)
+   remains pending. Runtime reconciliation, monitoring and whole-host recovery
    remain pending.
 5. **Capacity validation: pending.** Measure concurrent desktop workloads and
    establish supported student counts for each server and template.
