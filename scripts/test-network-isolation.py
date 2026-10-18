@@ -37,6 +37,16 @@ except OSError:
         raise RuntimeError(f'Unexpected TCP result: {container} -> {address}:{port}, expected reachable={expected}')
 
 
+def internet(container, phase):
+    print(f'Checking DNS then HTTPS {phase}: {container}', flush=True)
+    result = run('docker', 'exec', container, 'python3', '-c',
+                'import socket; socket.getaddrinfo("example.com",443); print("DNS resolution OK")', timeout=25)
+    print(result.stdout.strip(), flush=True)
+    result = run('docker', 'exec', container, 'python3', '-c',
+                'from urllib.request import urlopen; r=urlopen("https://example.com",timeout=15); assert r.status==200; print("HTTPS OK")', timeout=25)
+    print(result.stdout.strip(), flush=True)
+
+
 def preflight():
     if os.geteuid() != 0:
         raise RuntimeError('Run with sudo on the Docker host.')
@@ -87,6 +97,7 @@ def main():
             run('docker', 'create', '--name', name, '--network', NETWORK, '--ip', ip,
                 '--label', 'linux-lab.isolation-test=true', '--cap-drop', 'ALL',
                 '--security-opt', 'no-new-privileges:true', '--read-only', '--user', '65534:65534',
+                '--dns', '1.1.1.1', '--dns', '8.8.8.8',
                 '--memory', '64m', '--pids-limit', '32', '--sysctl', 'net.ipv6.conf.all.disable_ipv6=1',
                 '--entrypoint', 'python3', IMAGE, '-m', 'http.server', '3000', '--bind', '0.0.0.0')
             created.append(name)
@@ -115,6 +126,8 @@ def main():
         threading.Thread(target=accept_connections, daemon=True).start()
         tcp(NAMES[0], '172.30.250.1', port, True)
         print('PASS: peer, simulated control service and host listener reachable before filtering.', flush=True)
+        for name in NAMES[:2]:
+            internet(name, 'before filtering')
         for tool in ('iptables', 'ip6tables'):
             run(tool, '-w', '5', '-N', CHAIN)
             chains.append(tool)
@@ -145,8 +158,7 @@ def main():
         tcp(NAMES[2], '172.30.250.129', 3000, True)
         print('PASS: student peer/control/host connections blocked; proxy-initiated desktop TCP works.', flush=True)
         for name in NAMES[:2]:
-            run('docker', 'exec', name, 'python3', '-c',
-                'from urllib.request import urlopen; r=urlopen("https://example.com", timeout=15); assert r.status==200', timeout=25)
+            internet(name, 'after filtering')
             run('docker', 'exec', name, 'python3', '-c',
                 'from pathlib import Path; assert Path("/proc/sys/net/ipv6/conf/all/disable_ipv6").read_text().strip()=="1"')
         print('PASS: DNS/HTTPS internet access works and student IPv6 is disabled.', flush=True)

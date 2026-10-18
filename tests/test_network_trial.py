@@ -15,7 +15,7 @@ class TrialTests(unittest.TestCase):
         calls=[]
         def run(*args, **kwargs):
             calls.append(args)
-            if fail and args[:3] == ('docker','exec',m.NAMES[0]):
+            if fail and any(c[0]=='iptables' and '-I' in c for c in calls) and args[:3] == ('docker','exec',m.NAMES[0]):
                 raise subprocess.CalledProcessError(1,args,stderr='internet probe failed')
             return subprocess.CompletedProcess(args,0,stdout='',stderr='')
         sock=MagicMock()
@@ -30,6 +30,13 @@ class TrialTests(unittest.TestCase):
 
     def test_rules_scoped_and_cleanup_order(self):
         calls=self.exercise()
+        creates=[c for c in calls if c[:2]==('docker','create')]
+        for create in creates:
+            self.assertIn('1.1.1.1', create)
+            self.assertIn('8.8.8.8', create)
+        first_probe=next(i for i,c in enumerate(calls) if c[:2]==('docker','exec'))
+        first_hook=next(i for i,c in enumerate(calls) if c[0]=='iptables' and '-I' in c)
+        self.assertLess(first_probe, first_hook)
         hooks=[c for c in calls if c[0] in ('iptables','ip6tables') and '-I' in c]
         self.assertEqual(len(hooks),4)
         for hook in hooks:

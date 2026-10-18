@@ -17,7 +17,12 @@ Run from the source checkout with `sudo python3 scripts/test-network-isolation.p
 It uses the existing local `backend-api` image; no image downloads/rebuilds and no
 changes to the API, Compose, live desktops, global firewall policies or SSH.
 Allow up to a few minutes. It makes HTTPS requests to https://example.com to
-verify internet connectivity. Test containers are capped at 64 MiB each, have a
+verify internet connectivity before and after filtering, with separate DNS and
+HTTPS diagnostics. Test containers explicitly use 1.1.1.1 and 8.8.8.8 as upstream
+resolvers to avoid inheriting a private router DNS address blocked by the policy.
+These are per-container trial settings, not host or production DNS changes. If
+the local network blocks public DNS, the baseline will fail before rules are added;
+use the output to design an explicit permitted resolver path. Test containers are capped at 64 MiB each, have a
 read-only root filesystem, run as UID 65534, and drop all capabilities.
 
 The trial reserves `linux-lab-isolation-test`, bridge `ll-isotest`, subnet
