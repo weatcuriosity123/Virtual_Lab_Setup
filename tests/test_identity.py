@@ -286,3 +286,48 @@ with patch.dict(os.environ, {'PERSISTENT_HOME_TEMPLATES':'linux'}):
     lab.docker_client.volumes.remove.assert_not_called()
     assert all(e['classroom_id']!='test-class' for e in client.get('/admin/overview',headers=faculty).json()['storage_entitlements'])
 print('PASS: storage subscriptions, scope protection, atomic bulk changes, expiry and temporary fallback')
+
+# Permanent deletion is scoped, confirmed, attachment-safe, and never forced.
+from unittest.mock import MagicMock
+from docker.errors import APIError
+with classrooms.connect() as db:
+    homes=storage.known_homes(db)
+home=next(h for h in homes.values() if h['classroom_id']=='test-class' and h['email']=='alice@example.com')
+volume=MagicMock()
+volume.name=home['name']
+volume.attrs={'Driver':'local','Options':None,'Labels':{
+    'linux-lab.storage':'home-v1','linux-lab.home':home['name'],
+    'linux-lab.college':home['college_id'],'linux-lab.classroom':home['classroom_id'],
+    'linux-lab.template':home['template_id']}}
+lab.docker_client.volumes.list.return_value=[volume]
+lab.docker_client.volumes.get.side_effect=None
+lab.docker_client.volumes.get.return_value=volume
+lab.docker_client.containers.list.return_value=[]
+body={'name':home['name'],'confirmation':'DELETE alice@example.com'}
+assert client.get('/admin/saved-homes',headers=headers()).status_code==403
+assert client.get('/admin/saved-homes',headers=faculty).json()['homes']==[]
+assert client.post('/admin/saved-homes/delete',headers=faculty,json=body).status_code==404
+assert client.post('/admin/saved-homes/delete',headers=admin_headers,json={**body,'confirmation':'yes'}).status_code==400
+lab.docker_client.containers.list.return_value=[object()]
+assert client.post('/admin/saved-homes/delete',headers=admin_headers,json=body).status_code==409
+volume.remove.assert_not_called()
+lab.docker_client.containers.list.return_value=[]
+volume.attrs['Options']={'type':'none','device':'/host/path','o':'bind'}
+assert client.post('/admin/saved-homes/delete',headers=admin_headers,json=body).status_code==409
+volume.remove.assert_not_called()
+volume.attrs['Options']=None
+volume.attrs['Labels']['linux-lab.classroom']='wrong'
+assert client.post('/admin/saved-homes/delete',headers=admin_headers,json=body).status_code==409
+volume.remove.assert_not_called()
+volume.attrs['Labels']['linux-lab.classroom']=home['classroom_id']
+volume.remove.side_effect=APIError('busy')
+assert client.post('/admin/saved-homes/delete',headers=admin_headers,json=body).status_code==409
+volume.remove.reset_mock();volume.remove.side_effect=None
+with classrooms.connect() as db:
+    before=dict(db.execute("SELECT * FROM storage_entitlements WHERE classroom_id='test-class' AND email='alice@example.com'").fetchone())
+assert client.post('/admin/saved-homes/delete',headers=admin_headers,json=body).status_code==200
+volume.remove.assert_called_once_with(force=False)
+with classrooms.connect() as db:
+    assert before==dict(db.execute("SELECT * FROM storage_entitlements WHERE classroom_id='test-class' AND email='alice@example.com'").fetchone())
+    assert db.execute("SELECT COUNT(*) FROM admin_events WHERE action='membership.home_deleted'").fetchone()[0]==1
+print('PASS: permanent home deletion scope, confirmation, labels, attachment guard, failure handling and audit')

@@ -125,3 +125,12 @@ The server must allow the template through PERSISTENT_HOME_TEMPLATES before gran
 persistence. Existing pilot users need explicit assignment after this update; their
 saved volumes are retained. Persistent hard disk quotas are still pending and the
 dashboard labels this limitation. See [student storage](student-storage.md).
+
+## Permanently deleting a saved home
+
+Open **Saved student homes** and use **Delete permanently** for the correct student,
+classroom and template. End attached labs first, including any stopped containers
+that still reference the volume. Type `DELETE student@email` exactly as prompted.
+The action is scoped to your colleges and audited. It removes the selected saved
+files and settings, leaves other homes/backups alone, and does not cancel the storage
+subscription. No undo is provided; a future persistent session starts a fresh home.

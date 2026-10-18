@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 import classrooms
 import identity
+import storage
+from docker.errors import APIError, NotFound
 
 
 class Entry(BaseModel):
@@ -53,6 +55,11 @@ class StorageSubscription(BulkMembers):
         if value is not None and (value.tzinfo is None or value <= datetime.now(timezone.utc)):
             raise ValueError('Use a future expiry with a timezone, or leave blank.')
         return value.astimezone(timezone.utc) if value else None
+
+
+class DeleteHome(BaseModel):
+    name: str = Field(pattern=r'^linux-lab-home-v1-[0-9a-f]{64}$')
+    confirmation: str = Field(max_length=270)
 
 
 class State(BaseModel):
@@ -138,6 +145,57 @@ def make_router(lab):
             result['college_admins'] = [dict(row) for row in db.execute('SELECT * FROM college_admins')] if platform else []
             result['capacity'] = lab.MAX_SESSIONS
             return result
+
+    @router.get('/saved-homes')
+    def saved_homes():
+        with closing(classrooms.connect()) as db:
+            homes = storage.known_homes(db, None if identity.is_platform_admin() else identity.admin_colleges(db))
+        result = []
+        try:
+            volumes = lab.docker_client.volumes.list(filters={'label':'linux-lab.storage=home-v1'})
+            for volume in volumes:
+                home = homes.get(volume.name)
+                if home is None:
+                    continue
+                try:
+                    storage.validate_home_volume(volume,home)
+                except HTTPException:
+                    result.append({**home,'attached':None,'deletable':False})
+                    continue
+                attached = len(lab.docker_client.containers.list(all=True,filters={'volume':home['name']}))
+                result.append({**home,'attached':attached,'deletable':attached==0})
+        except APIError:
+            raise HTTPException(503,'Could not inspect saved homes. Try again later.')
+        return {'homes':result}
+
+    @router.post('/saved-homes/delete')
+    async def delete_home(body: DeleteHome):
+        async with lab.creation_lock:
+            with closing(classrooms.connect()) as db:
+                home = storage.known_homes(db, None if identity.is_platform_admin() else identity.admin_colleges(db)).get(body.name)
+                if home is None:
+                    raise HTTPException(404,'Saved home not found in your colleges.')
+                classroom_scope(db,home['classroom_id'])
+            if body.confirmation != 'DELETE ' + home['email']:
+                raise HTTPException(400,'Type DELETE followed by the exact student email to confirm.')
+            try:
+                volume = lab.docker_client.volumes.get(body.name)
+            except NotFound:
+                raise HTTPException(404,'Saved home no longer exists.')
+            storage.validate_home_volume(volume,home)
+            if lab.docker_client.containers.list(all=True,filters={'volume':body.name}):
+                raise HTTPException(409,'End the lab first. A running or stopped container still references this saved home.')
+            details={'email':home['email'],'home':body.name,'template_id':home['template_id']}
+            # Record intent before the external side effect; failure never reports success.
+            write(lambda db: classroom_scope(db,home['classroom_id']),
+                  'membership.home_delete_requested',home['classroom_id'],details)
+            try:
+                volume.remove(force=False)
+            except APIError:
+                write(lambda db: None,'membership.home_delete_failed',home['classroom_id'],details)
+                raise HTTPException(409,'Docker could not delete the saved home. Refresh and check for attached labs.')
+            write(lambda db: None,'membership.home_deleted',home['classroom_id'],details)
+        return {'status':'deleted','name':body.name}
 
     @router.post('/colleges/{key}/admins')
     def assign_admin(key: str, body: Member):

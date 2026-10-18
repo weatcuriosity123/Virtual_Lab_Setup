@@ -20,7 +20,8 @@ another home. Changing an image under the same template ID reuses that home; tes
 compatibility first. Home settings and any saved credentials also persist.
 
 Membership checks still apply before mounting. Revocation blocks new access but
-retains data. No automated deletion or retention schedule is implemented. Existing
+retains data. No automated deletion or retention schedule is implemented. A confirmed admin
+action can permanently delete a selected unattached saved home (see below). Existing
 volume labels are checked before reuse. A second container cannot attach the same
 home through the API while any existing container references it, including stopped
 orphan containers. Operators must investigate these rather than deleting data.
@@ -93,3 +94,41 @@ Run `bash scripts/inspect-storage-host.sh` on the host to inspect quota prerequi
 It does not enable quotas, remount or edit the filesystem. Plan and back up before
 any root-filesystem feature changes. File-manager capacity reporting must also be
 validated: a project quota does not necessarily appear as a separate filesystem size.
+
+## Permanent deletion from the dashboard
+
+Use `/admin` → **Saved student homes** → **Delete permanently**. Each row identifies
+the student, classroom, template and a home-ID suffix. Type `DELETE student@email`
+exactly as prompted. This removes that specific home, not every home belonging to
+that email. Other classrooms/templates and backups remain untouched. The subscription
+is unchanged; a future persistent session creates a fresh home. Deleting data is not
+a substitute for revoking enrollment or disabling a subscription.
+
+The API checks college scope, server-derived ownership, volume metadata, and running
+AND stopped container references. It serializes deletion with session creation and
+uses Docker removal without force. Deletion request/success/failure are audited.
+Only ordinary local Docker home volumes can be deleted by this implementation;
+external, bind or block-backed volumes are refused because deleting their Docker
+record alone does not erase the files. Unknown/orphan volumes not resolvable from
+session history require host-operator investigation. Preserve session history until
+a dedicated storage registry is implemented. This is logical deletion, not guaranteed
+secure erasure from an SD card or removal from separately maintained backups.
+
+## Ext4 hard-quota verification
+
+The observed Pi kernel has quota support and quota tools installed, but its root
+ext4 filesystem does not have the `quota` or `project` feature. Do not enable these
+features blindly on the running root filesystem. A separate quota-enabled storage
+pool is the intended next step; migration and API enforcement are not implemented yet.
+
+First run `sudo bash scripts/test-storage-quota.sh` on the Pi. It creates a disposable
+64 MiB file in /var/tmp, formats ONLY that file with quota/project features, mounts
+it, assigns a 4 MiB project quota and attempts an 8 MiB write as UID 65534. Success
+means the write fails with `Disk quota exceeded`. Cleanup unmounts and removes the
+test image. If unmount fails, the script retains the test path for investigation.
+It does not alter root filesystem features, fstab or existing student data.
+
+This script has shell syntax validation only in development; the actual kernel test
+must run on the Pi. Passing it proves unprivileged project quota enforcement, not
+complete container isolation or production readiness. Do not advertise persistent
+plan limits until migration, restart behavior and container-level enforcement pass.

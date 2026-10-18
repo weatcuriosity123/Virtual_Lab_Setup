@@ -1,10 +1,11 @@
-"""Opt-in, single-host persistent homes. Never delete a student's named volume."""
+"""Opt-in, single-host homes. Deletion is restricted to the confirmed admin endpoint."""
 import hashlib
 import json
 import os
 from contextlib import closing
 from datetime import datetime, timezone
 import classrooms
+from types import SimpleNamespace
 
 from docker.errors import NotFound
 from fastapi import HTTPException
@@ -57,3 +58,36 @@ def home_options(client, context, actor, auth_mode):
     if any((volume.attrs.get('Labels') or {}).get(k) != v for k, v in labels.items()):
         raise HTTPException(409, 'Saved-home ownership metadata does not match. Contact an admin.')
     return {'volumes': {name: {'bind': '/config', 'mode': 'rw'}}}
+
+
+def known_homes(db, college_ids=None):
+    """Resolve hashed home names from server-owned identity/session history."""
+    result = {}
+    sql = """SELECT DISTINCT college_id,classroom_id,template_id,owner_subject,owner_email
+        FROM sessions WHERE college_id IS NOT NULL AND classroom_id IS NOT NULL
+        AND template_id IS NOT NULL AND owner_subject IS NOT NULL AND owner_email IS NOT NULL"""
+    params = []
+    if college_ids is not None:
+        if not college_ids:
+            return result
+        sql += ' AND college_id IN (' + ','.join('?' for _ in college_ids) + ')'
+        params = college_ids
+    for row in db.execute(sql,params):
+        context = dict(row)
+        name = home_name(context, SimpleNamespace(subject=row['owner_subject'],email=row['owner_email']))
+        result[name] = {'name':name,'email':row['owner_email'].lower(),
+                        'college_id':row['college_id'],'classroom_id':row['classroom_id'],
+                        'template_id':row['template_id']}
+    return result
+
+
+def validate_home_volume(volume, home):
+    expected = {'linux-lab.storage':'home-v1','linux-lab.home':home['name'],
+                'linux-lab.college':home['college_id'],'linux-lab.classroom':home['classroom_id'],
+                'linux-lab.template':home['template_id']}
+    if any((volume.attrs.get('Labels') or {}).get(k)!=v for k,v in expected.items()):
+        raise HTTPException(409, 'Saved-home ownership metadata does not match. Nothing was deleted.')
+    # External/bind/block volumes need a storage-specific purge; removing their
+    # Docker record alone would NOT delete the underlying files.
+    if volume.attrs.get('Driver') != 'local' or volume.attrs.get('Options'):
+        raise HTTPException(409, 'This storage type requires a host-managed purge. Nothing was deleted.')
