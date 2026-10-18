@@ -373,3 +373,20 @@ with patch.dict(os.environ, {'PERSISTENT_STORAGE_BACKEND':'quota'}):
         assert volume.remove.call_count==before
         assert any(c.args==('delete',) for c in rpc.call_args_list)
 print('PASS: quota home dashboard isolation and broker-based deletion')
+
+# Host-wide health is platform-only, with safe failure messages and disk warnings.
+import admin as admin_module
+with patch.object(lab.docker_client, 'ping') as ping:
+    assert client.get('/admin/system-health').status_code == 401
+    assert client.get('/admin/system-health', headers=headers()).status_code == 403
+    assert client.get('/admin/system-health', headers=faculty).status_code == 403
+    ping.assert_not_called()
+with patch.object(lab.docker_client, 'ping', side_effect=RuntimeError('secret-internal-detail')), \
+     patch.object(admin_module.shutil, 'disk_usage', return_value=SimpleNamespace(total=20*1024**3, free=1024**3)):
+    response=client.get('/admin/system-health', headers=admin_headers)
+    assert response.status_code == 200
+    assert 'secret-internal-detail' not in response.text
+    checks={r['name']:r for r in response.json()['checks']}
+    assert checks['Docker']['status']=='UNAVAILABLE'
+    assert checks['Database filesystem space']['status']=='CRITICAL'
+print('System health authorization, failure redaction and low-disk checks passed.')

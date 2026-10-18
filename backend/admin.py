@@ -4,6 +4,8 @@ import sqlite3
 import re
 import json
 import os
+import shutil
+import network_guard
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
@@ -112,6 +114,49 @@ def make_router(lab):
         if row is None:
             raise HTTPException(404, 'Classroom not found.')
         identity.require_college_admin(db, row['college_id'])
+
+    @router.get('/system-health')
+    def system_health():
+        # Guard before any host-wide inspection: never expose this to college admins.
+        identity.require_platform_admin()
+        checks = []
+        def check(name, operation):
+            try:
+                detail = operation()
+                checks.append({'name': name, 'status': 'OK', 'detail': detail})
+            except Exception:
+                # Docker/socket exception messages can contain internal paths or credentials.
+                checks.append({'name': name, 'status': 'UNAVAILABLE',
+                               'detail': 'Check the host service and its logs.'})
+        def docker_health():
+            if not lab.docker_client.ping():
+                raise RuntimeError('Docker unavailable')
+            return 'Docker API responds.'
+        def proxy_health():
+            proxy = lab.docker_client.containers.get(lab.PROXY_CONTAINER)
+            if proxy.status != 'running':
+                raise RuntimeError('Proxy not running')
+            return 'Proxy container is running; public connectivity is not tested.'
+        check('Docker', docker_health)
+        check('Desktop proxy', proxy_health)
+        if storage.quota_enabled():
+            check('Saved storage', lambda: (storage.quota_rpc('health'), 'Quota service responds.')[1])
+        else:
+            checks.append({'name': 'Saved storage', 'status': 'NOT ENABLED', 'detail': 'Quota backend is not enabled.'})
+        if os.getenv('LAB_NETWORK_ISOLATION', 'off') != 'off' or lab.DOCKER_NETWORK == 'linux-lab-students':
+            check('Network isolation', lambda: (network_guard.container_options(lab.DOCKER_NETWORK), 'Guard checks passed.')[1])
+        else:
+            checks.append({'name': 'Network isolation', 'status': 'NOT ENABLED', 'detail': 'Admission guard is not enabled.'})
+        try:
+            usage = shutil.disk_usage(os.path.dirname(lab.SESSION_DB) or '.')
+            free_gib = usage.free / (1024 ** 3)
+            percent = usage.free / usage.total * 100
+            status = 'CRITICAL' if free_gib < 2 or percent < 5 else ('WARNING' if free_gib < 5 or percent < 10 else 'OK')
+            checks.append({'name': 'Database filesystem space', 'status': status,
+                           'detail': f'{free_gib:.1f} GiB free ({percent:.1f}%). Backups and Docker may share this disk; verify on host.'})
+        except OSError:
+            checks.append({'name': 'Database filesystem space', 'status': 'UNAVAILABLE', 'detail': 'Cannot read filesystem usage.'})
+        return {'checked_at': datetime.now(timezone.utc).isoformat(), 'checks': checks}
 
     @router.get('/overview')
     def overview():
