@@ -17,8 +17,10 @@ feedback, platform admin dashboard, bulk enrollment, admin activity history.
 3. **Student work storage: pilot implementation.** Opt-in verified student homes
    and manual per-student subscription/expiry controls are implemented; see [student-storage.md](student-storage.md). Live expiry and
    isolation validation remain required. Hard-quota pool integration is implemented
-   with local tests; deployment/reboot/container acceptance, backups and restoration
-   remain pending.
+   with local tests; the Pi deployment, in-container hard quota and saved-file
+   recovery after reboot passed on 2026-10-18. Cold backup and isolated recovery
+   drill tooling is implemented; its host acceptance and full replacement-host
+   recovery remain pending. See [backup-recovery.md](backup-recovery.md).
 4. **Reliability and isolation: pending.** Reconcile after restarts, harden cleanup,
    network isolation and monitoring, and prove backup recovery.
 5. **Capacity validation: pending.** Measure concurrent desktop workloads and

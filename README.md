@@ -166,3 +166,9 @@ See [student storage](docs/student-storage.md) for opt-in CSE home persistence,
 identity isolation, deployment and live acceptance tests. The Pi pilot uses one
 lab at a time with a four-core CPU ceiling; VS Code UI tuning and production
 sandbox configuration are deferred, not considered solved.
+
+### Storage backup and recovery
+
+Quota-pool pilots can use the [maintenance-window backup and recovery drill](docs/backup-recovery.md).
+The drill restores into a separate directory; full replacement-host recovery and
+off-host backup retention remain launch gates.

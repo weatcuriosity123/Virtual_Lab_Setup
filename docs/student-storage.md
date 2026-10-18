@@ -131,3 +131,10 @@ A complete backup must include the pool data, host registry/UUID, application da
 and configuration while writes are stopped. Tested backup/restore and disk-failure
 recovery remain the next work item. An image and its original copy on one SD card do
 not protect against SD card failure.
+
+## Backup and recovery
+
+See [backup-recovery.md](backup-recovery.md) for a cold pool backup and isolated
+read-only recovery drill. Keep the registry, application database and pool from
+the same backup together. Reboot persistence and in-lab quota enforcement have
+passed on the pilot Pi; backup/recovery host acceptance remains required.

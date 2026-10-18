@@ -6,6 +6,7 @@ python3 tests/test_lifecycle.py
 python3 tests/test_classrooms.py
 python3 tests/test_storage.py
 python3 tests/test_quota_agent.py
+python3 tests/test_storage_backup.py
 python3 tests/test_identity.py
 js_file="$(mktemp --suffix=.js)"
 trap 'rm -f "$js_file"' EXIT
