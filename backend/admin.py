@@ -4,7 +4,7 @@ import sqlite3
 import re
 import json
 import os
-import shutil
+import disk_guard
 import network_guard
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -147,15 +147,7 @@ def make_router(lab):
             check('Network isolation', lambda: (network_guard.container_options(lab.DOCKER_NETWORK), 'Guard checks passed.')[1])
         else:
             checks.append({'name': 'Network isolation', 'status': 'NOT ENABLED', 'detail': 'Admission guard is not enabled.'})
-        try:
-            usage = shutil.disk_usage(os.path.dirname(lab.SESSION_DB) or '.')
-            free_gib = usage.free / (1024 ** 3)
-            percent = usage.free / usage.total * 100
-            status = 'CRITICAL' if free_gib < 2 or percent < 5 else ('WARNING' if free_gib < 5 or percent < 10 else 'OK')
-            checks.append({'name': 'Database filesystem space', 'status': status,
-                           'detail': f'{free_gib:.1f} GiB free ({percent:.1f}%). Backups and Docker may share this disk; verify on host.'})
-        except OSError:
-            checks.append({'name': 'Database filesystem space', 'status': 'UNAVAILABLE', 'detail': 'Cannot read filesystem usage.'})
+        checks.extend(disk_guard.snapshot(lab.SESSION_DB))
         return {'checked_at': datetime.now(timezone.utc).isoformat(), 'checks': checks}
 
     @router.get('/overview')

@@ -11,7 +11,7 @@ College admins continue to receive only their permitted college data. Menus do
 not replace backend authorization. The new system-health endpoint requires a
 platform admin before inspecting any services.
 
-System Health is a manual snapshot: Docker response, proxy container state,
+System Health refreshes every 60 seconds while its page is visible: Docker response, proxy container state,
 quota broker health, network guard validation, and free space on the filesystem
 holding SESSION_DB. Click Check system health to refresh. A running proxy does
 not establish that Cloudflare or the public desktop works. A failed service
@@ -19,10 +19,10 @@ check is shown as UNAVAILABLE, not healthy. Internal exception text is withheld.
 
 Disk space is WARNING below 5 GiB or 10% free, CRITICAL below 2 GiB or 5% free.
 This filesystem is normally the Pi SD card, but can differ on other deployments.
-No files are deleted and admissions are not blocked by these warnings.
+No files are deleted. Critical space and unavailable disk checks now block new labs; see [disk protection](disk-protection.md).
 Saved-home project quotas do not constrain other container writable paths.
-Automatic alerts, host memory monitoring, log rotation and whole-desktop disk
-protection remain separate work; this is not completion of those milestones.
+External alerts, host memory monitoring and hard whole-desktop disk
+limits remain separate work; this is not completion of those milestones.
 
 ## Deploy
 

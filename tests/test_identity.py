@@ -382,7 +382,7 @@ with patch.object(lab.docker_client, 'ping') as ping:
     assert client.get('/admin/system-health', headers=faculty).status_code == 403
     ping.assert_not_called()
 with patch.object(lab.docker_client, 'ping', side_effect=RuntimeError('secret-internal-detail')), \
-     patch.object(admin_module.shutil, 'disk_usage', return_value=SimpleNamespace(total=20*1024**3, free=1024**3)):
+     patch.object(admin_module.disk_guard, 'snapshot', return_value=[{'name':'Database filesystem space','status':'CRITICAL','detail':'Low space'}]):
     response=client.get('/admin/system-health', headers=admin_headers)
     assert response.status_code == 200
     assert 'secret-internal-detail' not in response.text

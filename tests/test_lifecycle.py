@@ -32,7 +32,12 @@ async def expect_error(code, call):
 async def run():
     await expect_error(401, lab.create_session(lab.CreateSession(access_code='wrong')))
     request = lab.CreateSession(access_code='test-code', request_id='a'*32)
+    with patch.object(lab.disk_guard, 'require_space', side_effect=lab.HTTPException(503, 'Low disk')), patch.object(lab.storage, 'home_options') as homes:
+        await expect_error(503, lab.create_session(request))
+        homes.assert_not_called()
+        lab.docker_client.containers.run.assert_not_called()
     session = await lab.create_session(request)
+    assert lab.docker_client.containers.run.call_args.kwargs['log_config']['Config']=={'max-size':'10m','max-file':'3'}
     token, password = session['session_id'], session['desktop_password']
     assert session['status'] == 'starting'
     assert lab.session_capacity()['active_sessions'] == 1

@@ -5,3 +5,5 @@ nginx/sessions/
 __pycache__/
 startup-backup-*/
 classrooms-backup-*/
+
+docker-compose.yml.before-logs-*
