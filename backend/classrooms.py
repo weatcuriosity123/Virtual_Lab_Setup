@@ -44,6 +44,12 @@ def init_catalog(db):
     db.execute("""CREATE TABLE IF NOT EXISTS classroom_memberships (
       classroom_id TEXT NOT NULL REFERENCES classrooms(id), email TEXT NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(classroom_id,email))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS storage_entitlements (
+      classroom_id TEXT NOT NULL, email TEXT NOT NULL,
+      persistent INTEGER NOT NULL DEFAULT 0 CHECK(persistent IN (0,1)),
+      expires_at TEXT,
+      PRIMARY KEY(classroom_id,email),
+      FOREIGN KEY(classroom_id,email) REFERENCES classroom_memberships(classroom_id,email))""")
     db.execute("""CREATE TABLE IF NOT EXISTS admin_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at TEXT NOT NULL,
         actor_email TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,

@@ -3,6 +3,7 @@ from contextlib import closing
 import sqlite3
 import re
 import json
+import os
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
@@ -40,6 +41,18 @@ class Member(BaseModel):
 
 class BulkMembers(BaseModel):
     emails: str = Field(min_length=1, max_length=130000)
+
+
+class StorageSubscription(BulkMembers):
+    persistent: bool
+    expires_at: datetime | None = None
+
+    @field_validator('expires_at')
+    @classmethod
+    def validate_expiry(cls, value):
+        if value is not None and (value.tzinfo is None or value <= datetime.now(timezone.utc)):
+            raise ValueError('Use a future expiry with a timezone, or leave blank.')
+        return value.astimezone(timezone.utc) if value else None
 
 
 class State(BaseModel):
@@ -112,6 +125,9 @@ def make_router(lab):
                 'SELECT * FROM lab_templates' if platform else 'SELECT id,name,enabled FROM lab_templates')]
             result['classroom_memberships'] = rows('''SELECT m.* FROM classroom_memberships m
                 JOIN classrooms c ON c.id=m.classroom_id WHERE {scope}''','c.college_id')
+            result['storage_entitlements'] = rows('''SELECT e.* FROM storage_entitlements e
+                JOIN classrooms c ON c.id=e.classroom_id WHERE {scope}''', 'c.college_id')
+            result['persistent_home_templates'] = [x.strip() for x in os.getenv('PERSISTENT_HOME_TEMPLATES','').split(',') if x.strip()]
             result['sessions'] = rows('''SELECT token,owner_email,college_name,classroom_name,status,expires_at
                 FROM sessions WHERE status IN ('active','starting') AND {scope} ORDER BY expires_at''','college_id')
             has_feedback = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feedback'").fetchone()
@@ -191,6 +207,30 @@ def make_router(lab):
                     counts['unchanged'] += 1
         write(operation, 'membership.bulk_enrolled', key, counts)
         return {'status': 'saved', **counts}
+
+    @router.post('/classrooms/{key}/storage')
+    def storage_subscription(key: str, body: StorageSubscription):
+        emails = [x.lower() for x in re.split(r'[\s,;]+', body.emails.strip()) if x]
+        if not 1 <= len(emails) <= 500 or any(len(x)>254 or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',x) for x in emails):
+            raise HTTPException(400, 'Enter 1–500 valid student emails. Nothing was saved.')
+        emails = list(dict.fromkeys(emails))
+        expiry = body.expires_at.isoformat() if body.persistent and body.expires_at else None
+        def operation(db):
+            classroom_scope(db,key)
+            template = db.execute('SELECT template_id FROM classrooms WHERE id=?',(key,)).fetchone()[0]
+            allowed = {x.strip() for x in os.getenv('PERSISTENT_HOME_TEMPLATES','').split(',') if x.strip()}
+            if body.persistent and template not in allowed:
+                raise HTTPException(409, 'Persistent storage is not enabled for this template on the server.')
+            for email in emails:
+                if not db.execute('SELECT 1 FROM classroom_memberships WHERE classroom_id=? AND email=?',(key,email)).fetchone():
+                    raise HTTPException(400, 'Every email must already be enrolled in this classroom. Nothing was saved.')
+                db.execute("""INSERT INTO storage_entitlements(classroom_id,email,persistent,expires_at)
+                    VALUES (?,?,?,?) ON CONFLICT(classroom_id,email) DO UPDATE SET
+                    persistent=excluded.persistent, expires_at=excluded.expires_at""",
+                    (key,email,body.persistent,expiry))
+        write(operation, 'membership.storage_changed',key,
+              {'emails':emails,'persistent':body.persistent,'expires_at':expiry})
+        return {'status':'saved','students':len(emails)}
 
     @router.post('/{kind}/{key}/enabled')
     def enabled(kind: str, key: str, body: State):

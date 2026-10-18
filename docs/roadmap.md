@@ -15,7 +15,7 @@ feedback, platform admin dashboard, bulk enrollment, admin activity history.
    Existing Linux template remains the starting point. ROS2/Gazebo is not yet
    provided as a tested branch image.
 3. **Student work storage: pilot implementation.** Opt-in verified student homes
-   are implemented; see [student-storage.md](student-storage.md). Live expiry and
+   and manual per-student subscription/expiry controls are implemented; see [student-storage.md](student-storage.md). Live expiry and
    isolation validation, hard quotas, backups and restoration remain pending.
 4. **Reliability and isolation: pending.** Reconcile after restarts, harden cleanup,
    network isolation and monitoring, and prove backup recovery.

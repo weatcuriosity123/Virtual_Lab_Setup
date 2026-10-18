@@ -244,6 +244,8 @@ storage_context = dict(college_id='test', classroom_id='test-class', template_id
 lab.docker_client.containers.list.return_value=[]
 lab.docker_client.volumes.get.side_effect=lab.NotFound('missing')
 lab.docker_client.volumes.create.side_effect=lambda **kw: SimpleNamespace(attrs={'Labels':kw['labels']})
+with classrooms.connect() as db:
+    db.execute("INSERT INTO storage_entitlements(classroom_id,email,persistent) VALUES('test-class','alice@example.com',1)")
 with patch.dict(os.environ, {'PERSISTENT_HOME_TEMPLATES':'linux'}), patch.object(lab, 'admission_context', return_value=storage_context):
     created=client.post('/sessions',headers=headers(),json={'access_code':'class-secret'})
     assert created.status_code==200,created.text
@@ -254,3 +256,33 @@ with patch.dict(os.environ, {'PERSISTENT_HOME_TEMPLATES':'linux'}), patch.object
     duplicate=client.post('/sessions',headers=headers(),json={'access_code':'class-secret'})
     assert duplicate.status_code==409,duplicate.text
 print('PASS: session API selects persistent mount and rejects simultaneous saved-home use')
+
+# Subscription scopes, bulk atomicity, expiry and retained saved homes.
+import storage
+from datetime import datetime, timezone, timedelta
+with patch.dict(os.environ, {'PERSISTENT_HOME_TEMPLATES':'linux'}):
+    path='/admin/classrooms/test-class/storage'
+    assert client.post(path,headers=headers(),json={'emails':'alice@example.com','persistent':True}).status_code==403
+    assert client.post(path,headers=faculty,json={'emails':'alice@example.com','persistent':True}).status_code==403
+    assert client.post(path,headers=admin_headers,json={'emails':'alice@example.com','persistent':True,'expires_at':'2000-01-01T00:00:00Z'}).status_code==422
+    assert client.post(path,headers=admin_headers,json={'emails':'alice@example.com','persistent':True,'expires_at':'2099-01-01T00:00:00'}).status_code==422
+    assert client.post(path,headers=admin_headers,json={'emails':'bob@example.com missing@example.com','persistent':True}).status_code==400
+    assert not storage.subscription_active('test-class','bob@example.com')
+    expiry=(datetime.now(timezone.utc)+timedelta(days=30)).isoformat()
+    result=client.post(path,headers=admin_headers,json={'emails':'ALICE@example.com,bob@example.com,alice@example.com','persistent':True,'expires_at':expiry})
+    assert result.status_code==200 and result.json()['students']==2,result.text
+    assert storage.subscription_active('test-class','alice@example.com')
+    assert storage.subscription_active('test-class','bob@example.com')
+    assert client.post(path,headers=admin_headers,json={'emails':'bob@example.com','persistent':False}).status_code==200
+    assert not storage.subscription_active('test-class','bob@example.com')
+    with classrooms.connect() as db:
+        db.execute("UPDATE storage_entitlements SET expires_at='2000-01-01T00:00:00+00:00' WHERE email='alice@example.com'")
+    assert not storage.subscription_active('test-class','alice@example.com')
+    # Expired homes use bounded tmpfs, without accessing or deleting Docker volumes.
+    lab.docker_client.volumes.reset_mock()
+    opts=storage.home_options(lab.docker_client,storage_context,SimpleNamespace(subject='alice',email='alice@example.com'),'cloudflare')
+    assert opts=={'tmpfs':{'/config':'rw,size=512m,mode=1777'}}
+    lab.docker_client.volumes.get.assert_not_called()
+    lab.docker_client.volumes.remove.assert_not_called()
+    assert all(e['classroom_id']!='test-class' for e in client.get('/admin/overview',headers=faculty).json()['storage_entitlements'])
+print('PASS: storage subscriptions, scope protection, atomic bulk changes, expiry and temporary fallback')

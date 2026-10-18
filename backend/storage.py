@@ -2,6 +2,9 @@
 import hashlib
 import json
 import os
+from contextlib import closing
+from datetime import datetime, timezone
+import classrooms
 
 from docker.errors import NotFound
 from fastapi import HTTPException
@@ -15,6 +18,20 @@ def home_name(context, actor):
     return 'linux-lab-home-v1-' + digest
 
 
+def subscription_active(classroom_id, email):
+    with closing(classrooms.connect()) as db:
+        row = db.execute("""SELECT e.persistent, e.expires_at FROM storage_entitlements e
+            JOIN classroom_memberships m ON m.classroom_id=e.classroom_id AND m.email=e.email
+            WHERE e.classroom_id=? AND e.email=? AND m.enabled=1""",
+            (classroom_id, email.lower())).fetchone()
+    if not row or not row['persistent']:
+        return False
+    if not row['expires_at']:
+        return True
+    expiry = datetime.fromisoformat(row['expires_at'])
+    return expiry.tzinfo is not None and expiry > datetime.now(timezone.utc)
+
+
 def home_options(client, context, actor, auth_mode):
     enabled = {x.strip() for x in os.getenv('PERSISTENT_HOME_TEMPLATES', '').split(',') if x.strip()}
     if context['template_id'] not in enabled:
@@ -23,6 +40,8 @@ def home_options(client, context, actor, auth_mode):
         context.get(key) for key in ('college_id', 'classroom_id', 'template_id')
     ):
         raise HTTPException(403, 'Persistent homes require verified classroom membership.')
+    if not subscription_active(context["classroom_id"], actor.email):
+        return {"tmpfs": {"/config": f"rw,size={context['home_mb']}m,mode=1777"}}
     name = home_name(context, actor)
     # Include stopped/orphaned containers: never share an editor profile, even if DB cleanup failed.
     if client.containers.list(all=True, filters={'volume': name}):

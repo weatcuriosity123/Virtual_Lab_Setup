@@ -26,6 +26,6 @@ lines=s.splitlines()
 lines=[line for line in lines if not any(line.startswith(k+'=') for k in updates)]
 lines.extend(k+'='+v for k,v in updates.items())
 p.write_text('\n'.join(lines)+'\n')
-print('Enabled CSE persistent homes; global pilot capacity: one lab. Saved .env backup.')
+print('Enabled CSE storage infrastructure; assign student persistence in /admin. Global pilot capacity: one lab. Saved .env backup.')
 PY
 docker compose up -d --force-recreate api

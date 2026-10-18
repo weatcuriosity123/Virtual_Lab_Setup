@@ -2,7 +2,9 @@
 
 Opt in with `PERSISTENT_HOME_TEMPLATES=cse-candidate-v1` in backend `.env`, then
 recreate the API. Other templates continue using temporary RAM-backed homes.
-Cloudflare verified identity and classroom enrollment are required. Never enable
+Cloudflare verified identity, classroom enrollment and an active per-student storage
+subscription are required. The template environment variable is an infrastructure
+allowlist, not an entitlement for every enrolled student. Never enable
 this for a public trial until storage quotas and backups are implemented.
 
 A named Docker volume is mounted at `/config` (Webtop's user home). Files in
@@ -33,7 +35,9 @@ Run a single API process/replica: its creation lock is process-local.
    slots and GLOBAL capacity to one, and enables persistence for that template.
    The script backs up `.env` and recreates the API. It does not rebuild the student
    image. Four cores are a ceiling, not a performance guarantee or reserved CPUs.
-3. Start a lab. In its desktop terminal:
+3. Open `/admin` → **Student storage subscriptions**. Select the classroom, enter
+   your enrolled email and select Persistent. Set an optional future expiry. Save.
+   Start a lab. In its desktop terminal:
    `printf 'storage acceptance\n' > "$HOME/Documents/persistence-test.txt"`
    (create Documents with `mkdir -p "$HOME/Documents"` if needed).
 4. Manually end the lab. Start a NEW lab using the same account/classroom and read
@@ -64,3 +68,28 @@ while the relevant labs are stopped, preserving numeric UID/GID and permissions.
 Disabling the opt-in restores temporary homes for new sessions and leaves named
 volumes intact. Re-enabling with the same identity/classroom/template reattaches
 saved data. Never delete a volume as part of deployment rollback.
+
+## Manual subscriptions
+
+The admin dashboard assigns temporary/persistent storage to 1–500 enrolled emails
+in a classroom, with optional timezone-aware expiry. College admins are restricted
+to their own colleges. Batch changes are atomic and audited. Enrollment is separate
+from storage: re-enrolling a student does not grant or renew a storage subscription.
+Payment processing and automatic paid-plan synchronization are not implemented.
+
+On upgrading from the template-wide persistence pilot, everyone defaults to temporary
+until explicitly assigned Persistent in the dashboard. Existing named volumes remain
+untouched and are reused when the same student/classroom/template is enabled again.
+Disable/expiry applies on the next start, not mid-session. Temporary files created
+while a subscription is inactive are not merged into the saved home. Renew the
+subscription before starting if the student needs their existing saved work.
+
+No disk-size selector is exposed yet, because persistent quotas are not enforced.
+The original Linux template's 300 MiB tmpfs cap still applies to its temporary homes;
+the CSE template currently uses its own home_mb value (512 MiB in the pilot).
+A future subscription quota must be enforced by the filesystem, not a periodic size
+scan. On the observed Pi the Docker root is ext4 on /dev/mmcblk0p2, mounted rw,noatime.
+Run `bash scripts/inspect-storage-host.sh` on the host to inspect quota prerequisites.
+It does not enable quotas, remount or edit the filesystem. Plan and back up before
+any root-filesystem feature changes. File-manager capacity reporting must also be
+validated: a project quota does not necessarily appear as a separate filesystem size.

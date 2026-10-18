@@ -111,3 +111,17 @@ through this dashboard. CLI operations continue to require trusted host access.
 Automated API tests cover attempts to manipulate another college by changing IDs,
 plus role escalation, revocation, scoped reads and session termination. Live
 Cloudflare/browser verification is still required on your deployment.
+
+## Student storage subscriptions
+
+Use **Student storage subscriptions** to select a classroom, paste enrolled emails,
+and assign Temporary or Persistent storage with an optional expiry date. Dates in
+the form use your browser's local timezone and are stored as UTC. Leaving expiry
+blank grants persistence until manually changed. This is manual entitlement
+management, not payment integration. Existing sessions keep their mounts; changes
+apply to the next session. No saved data is deleted on expiry or disable.
+
+The server must allow the template through PERSISTENT_HOME_TEMPLATES before granting
+persistence. Existing pilot users need explicit assignment after this update; their
+saved volumes are retained. Persistent hard disk quotas are still pending and the
+dashboard labels this limitation. See [student storage](student-storage.md).
