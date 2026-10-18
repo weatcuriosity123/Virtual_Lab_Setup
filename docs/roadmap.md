@@ -16,7 +16,9 @@ feedback, platform admin dashboard, bulk enrollment, admin activity history.
    provided as a tested branch image.
 3. **Student work storage: pilot implementation.** Opt-in verified student homes
    and manual per-student subscription/expiry controls are implemented; see [student-storage.md](student-storage.md). Live expiry and
-   isolation validation, hard quotas, backups and restoration remain pending.
+   isolation validation remain required. Hard-quota pool integration is implemented
+   with local tests; deployment/reboot/container acceptance, backups and restoration
+   remain pending.
 4. **Reliability and isolation: pending.** Reconcile after restarts, harden cleanup,
    network isolation and monitoring, and prove backup recovery.
 5. **Capacity validation: pending.** Measure concurrent desktop workloads and

@@ -123,8 +123,8 @@ apply to the next session. No saved data is deleted on expiry or disable.
 
 The server must allow the template through PERSISTENT_HOME_TEMPLATES before granting
 persistence. Existing pilot users need explicit assignment after this update; their
-saved volumes are retained. Persistent hard disk quotas are still pending and the
-dashboard labels this limitation. See [student storage](student-storage.md).
+saved volumes are retained. The quota backend enforces per-student MiB allowances after host installation;
+legacy mode remains unlimited and is labeled accordingly. See [student storage](student-storage.md).
 
 ## Permanently deleting a saved home
 
@@ -134,3 +134,13 @@ that still reference the volume. Type `DELETE student@email` exactly as prompted
 The action is scoped to your colleges and audited. It removes the selected saved
 files and settings, leaves other homes/backups alone, and does not cancel the storage
 subscription. No undo is provided; a future persistent session starts a fresh home.
+
+### Storage allowance
+
+The storage form accepts 64–16384 MiB (default 1024). The allowance applies on the
+next persistent lab start. The host quota pool must first be installed using
+`scripts/install-quota-storage.sh`; the API refuses to silently substitute temporary
+storage when it is unavailable. Saved-home rows show actual quota usage and the
+current enforced limit. Subscription rows show the requested next-start allowance.
+Pool capacity and current home usage may prevent a requested allowance being applied.
+Original migration copies are retained separately from the active quota home.

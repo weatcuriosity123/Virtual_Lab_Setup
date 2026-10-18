@@ -50,6 +50,11 @@ def init_catalog(db):
       expires_at TEXT,
       PRIMARY KEY(classroom_id,email),
       FOREIGN KEY(classroom_id,email) REFERENCES classroom_memberships(classroom_id,email))""")
+    if 'limit_mb' not in {row[1] for row in db.execute('PRAGMA table_info(storage_entitlements)')}:
+        db.execute('ALTER TABLE storage_entitlements ADD COLUMN limit_mb INTEGER NOT NULL DEFAULT 1024')
+    db.execute("""CREATE TABLE IF NOT EXISTS student_homes (
+        name TEXT PRIMARY KEY, college_id TEXT NOT NULL, classroom_id TEXT NOT NULL,
+        template_id TEXT NOT NULL, owner_subject TEXT NOT NULL, owner_email TEXT NOT NULL)""")
     db.execute("""CREATE TABLE IF NOT EXISTS admin_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at TEXT NOT NULL,
         actor_email TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,

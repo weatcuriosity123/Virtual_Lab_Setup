@@ -97,6 +97,7 @@ def init_db():
             "session_minutes": "INTEGER", "college_name": "TEXT",
             "owner_subject": "TEXT", "owner_email": "TEXT",
             "classroom_name": "TEXT", "template_name": "TEXT",
+            "home_volume": "TEXT",
         }.items():
             if name not in columns:
                 db.execute(f"ALTER TABLE sessions ADD COLUMN {name} {kind}")
@@ -303,7 +304,7 @@ async def create_session(request: CreateSession):
         if occupied >= context["max_sessions"]:
             raise HTTPException(429, "All desktops for this classroom are in use. Try again later.")
 
-        home_options = storage.home_options(docker_client, context, identity.actor(), identity.MODE)
+        home_options = await asyncio.to_thread(storage.home_options, docker_client, context, identity.actor(), identity.MODE)
 
         try:
             docker_client.images.get(context["image"])
@@ -345,8 +346,8 @@ async def create_session(request: CreateSession):
                     (token, container_name, password,
                      created_at, expires_at, status, request_id, college_id, classroom_id,
                      template_id, session_minutes, college_name, classroom_name, template_name,
-                     owner_subject, owner_email)
-                    VALUES (?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     owner_subject, owner_email, home_volume)
+                    VALUES (?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     token,
                     container_name,
@@ -358,6 +359,7 @@ async def create_session(request: CreateSession):
                     context["classroom_name"], context["template_name"],
                     identity.actor().subject if identity.actor() else None,
                     identity.actor().email if identity.actor() else None,
+                    next(iter(home_options.get("volumes",{})), None),
                 ))
                 db.commit()
 
@@ -469,6 +471,18 @@ async def lab_status(
                 remaining if row["status"] == "active" else 0
             ),
         }
+
+
+@app.get("/lab/{token}/storage")
+async def lab_storage(token: str, x_session_password: str = Header(...)):
+    row = authorize_lab_session(token, x_session_password)
+    volume = row['home_volume']
+    if not volume:
+        return {'mode':'temporary'}
+    if volume.endswith('-quota'):
+        info = await asyncio.to_thread(storage.quota_rpc,'info',name=volume[:-6])
+        return {'mode':'persistent',**info}
+    return {'mode':'persistent','limit_bytes':None}
 
 
 @app.post("/lab/{token}/terminate")

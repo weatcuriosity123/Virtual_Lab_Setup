@@ -331,3 +331,45 @@ with classrooms.connect() as db:
     assert before==dict(db.execute("SELECT * FROM storage_entitlements WHERE classroom_id='test-class' AND email='alice@example.com'").fetchone())
     assert db.execute("SELECT COUNT(*) FROM admin_events WHERE action='membership.home_deleted'").fetchone()[0]==1
 print('PASS: permanent home deletion scope, confirmation, labels, attachment guard, failure handling and audit')
+
+# Quota backend admission, owner-only usage and fail-closed provisioning.
+with classrooms.connect() as db:
+    db.execute("UPDATE sessions SET status='expired'")
+    db.execute("UPDATE storage_entitlements SET persistent=1,expires_at=NULL,limit_mb=300 WHERE classroom_id='test-class' AND email='alice@example.com'")
+quota_name=home['name']+'-quota'
+with patch.dict(os.environ, {'PERSISTENT_HOME_TEMPLATES':'linux','PERSISTENT_STORAGE_BACKEND':'quota'}), patch.object(lab,'admission_context',return_value=storage_context):
+    with patch.object(storage,'quota_rpc',return_value={'volume':quota_name,'state':'ready','used_bytes':4096,'limit_bytes':300*1048576}) as rpc:
+        created=client.post('/sessions',headers=headers(),json={'access_code':'class-secret'})
+        assert created.status_code==200,created.text
+        rpc.assert_called_once_with('ensure',name=home['name'],scope={'college_id':'test','classroom_id':'test-class','template_id':'linux'},limit_mb=300)
+        assert quota_name in lab.docker_client.containers.run.call_args.kwargs['volumes']
+        info=created.json();sid=info['session_id'];pwd=info['desktop_password']
+        response=client.get('/lab/'+sid+'/storage',headers={**headers(),'X-Session-Password':pwd})
+        assert response.status_code==200 and response.json()['limit_bytes']==300*1048576
+        assert client.get('/lab/'+sid+'/storage',headers={**headers('bob','bob@example.com'),'X-Session-Password':pwd}).status_code==403
+    before=lab.docker_client.containers.run.call_count
+    from fastapi import HTTPException
+    with patch.object(storage,'quota_rpc',side_effect=HTTPException(503,'Storage offline')):
+        assert client.post('/sessions',headers=headers(),json={'access_code':'class-secret'}).status_code==503
+    assert lab.docker_client.containers.run.call_count==before
+    assert client.post('/admin/classrooms/test-class/storage',headers=admin_headers,json={'emails':'alice@example.com','persistent':True,'limit_mb':63}).status_code==422
+print('PASS: quota mounts, allowance forwarding, owner usage authorization and fail-closed service outage')
+
+# Dashboard routes quota homes to the broker, retaining typed confirmation and audit.
+with patch.dict(os.environ, {'PERSISTENT_STORAGE_BACKEND':'quota'}):
+    def broker(op,**fields):
+        if op=='list': return {'homes':[{'name':home['name'],'state':'ready','used_bytes':4096,'limit_bytes':300*1048576}]}
+        if op=='info': return {'state':'ready'}
+        if op=='delete': return {'deleted':True,'original_backup_retained':True}
+        raise AssertionError(op)
+    with patch.object(storage,'quota_rpc',side_effect=broker) as rpc:
+        lab.docker_client.containers.list.return_value=[]
+        view=client.get('/admin/saved-homes',headers=admin_headers).json()['homes']
+        assert len(view)==1 and view[0]['backend']=='quota'
+        assert client.get('/admin/saved-homes',headers=faculty).json()['homes']==[]
+        before=volume.remove.call_count
+        response=client.post('/admin/saved-homes/delete',headers=admin_headers,json=body)
+        assert response.status_code==200 and response.json()['original_backup_retained']
+        assert volume.remove.call_count==before
+        assert any(c.args==('delete',) for c in rpc.call_args_list)
+print('PASS: quota home dashboard isolation and broker-based deletion')

@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import socket
 from contextlib import closing
 from datetime import datetime, timezone
 import classrooms
@@ -9,6 +10,33 @@ from types import SimpleNamespace
 
 from docker.errors import NotFound
 from fastapi import HTTPException
+
+
+def quota_enabled():
+    mode=os.getenv('PERSISTENT_STORAGE_BACKEND','legacy')
+    if mode not in ('legacy','quota'):
+        raise HTTPException(503,'Invalid persistent storage backend configuration.')
+    return mode == 'quota'
+
+
+def quota_rpc(op, **fields):
+    try:
+        with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as sock:
+            sock.settimeout(200 if op=='ensure' else 15)
+            sock.connect('/run/linux-lab-storage/agent.sock')
+            sock.sendall(json.dumps({'op':op,**fields}).encode()+b'\n')
+            with sock.makefile('rb') as stream:
+                raw=stream.readline(2*1024*1024)
+            if not raw.endswith(b'\n'):
+                raise ValueError('Incomplete storage response')
+            result=json.loads(raw)
+        if not result.get('ok'):
+            raise HTTPException(409,result.get('error','Storage request failed.'))
+        return result['result']
+    except HTTPException:
+        raise
+    except (OSError,ValueError):
+        raise HTTPException(503,'Saved storage is unavailable. No temporary replacement was created. Contact an administrator.')
 
 
 def home_name(context, actor):
@@ -44,6 +72,20 @@ def home_options(client, context, actor, auth_mode):
     if not subscription_active(context["classroom_id"], actor.email):
         return {"tmpfs": {"/config": f"rw,size={context['home_mb']}m,mode=1777"}}
     name = home_name(context, actor)
+    with closing(classrooms.connect()) as db:
+        db.execute("""INSERT OR IGNORE INTO student_homes
+            (name,college_id,classroom_id,template_id,owner_subject,owner_email) VALUES (?,?,?,?,?,?)""",
+            (name,context['college_id'],context['classroom_id'],context['template_id'],actor.subject,actor.email.lower()))
+        entitlement=db.execute('SELECT limit_mb FROM storage_entitlements WHERE classroom_id=? AND email=?',
+                               (context['classroom_id'],actor.email.lower())).fetchone()
+        db.commit()
+    if quota_enabled():
+        result=quota_rpc('ensure',name=name,
+                         scope={key:context[key] for key in ('college_id','classroom_id','template_id')},
+                         limit_mb=entitlement['limit_mb'])
+        if result.get('volume') != name+'-quota':
+            raise HTTPException(503,'Unexpected saved-home mount.')
+        return {'volumes': {result['volume']: {'bind':'/config','mode':'rw'}}}
     # Include stopped/orphaned containers: never share an editor profile, even if DB cleanup failed.
     if client.containers.list(all=True, filters={'volume': name}):
         raise HTTPException(409, 'Your saved home is attached to another lab. Resume or end that lab first; contact an admin if it has ended.')
@@ -72,7 +114,10 @@ def known_homes(db, college_ids=None):
             return result
         sql += ' AND college_id IN (' + ','.join('?' for _ in college_ids) + ')'
         params = college_ids
-    for row in db.execute(sql,params):
+    registered = "SELECT college_id,classroom_id,template_id,owner_subject,owner_email FROM student_homes"
+    if college_ids is not None:
+        registered += " WHERE college_id IN (" + ",".join("?" for _ in college_ids) + ")"
+    for row in list(db.execute(sql,params)) + list(db.execute(registered,params)):
         context = dict(row)
         name = home_name(context, SimpleNamespace(subject=row['owner_subject'],email=row['owner_email']))
         result[name] = {'name':name,'email':row['owner_email'].lower(),

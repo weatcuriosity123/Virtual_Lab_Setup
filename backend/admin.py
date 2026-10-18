@@ -47,6 +47,7 @@ class BulkMembers(BaseModel):
 
 class StorageSubscription(BulkMembers):
     persistent: bool
+    limit_mb: int = Field(default=1024, ge=64, le=16384)
     expires_at: datetime | None = None
 
     @field_validator('expires_at')
@@ -143,6 +144,7 @@ def make_router(lab):
                 WHERE {scope} ORDER BY f.submitted_at DESC LIMIT 100''', 's.college_id') if has_feedback else []
             result['activity'] = rows('SELECT * FROM admin_events WHERE {scope} ORDER BY id DESC LIMIT 100','college_id')
             result['college_admins'] = [dict(row) for row in db.execute('SELECT * FROM college_admins')] if platform else []
+            result['quota_backend'] = storage.quota_enabled()
             result['capacity'] = lab.MAX_SESSIONS
             return result
 
@@ -151,11 +153,18 @@ def make_router(lab):
         with closing(classrooms.connect()) as db:
             homes = storage.known_homes(db, None if identity.is_platform_admin() else identity.admin_colleges(db))
         result = []
+        quota_rows = {r['name']:r for r in storage.quota_rpc('list')['homes']} if storage.quota_enabled() else {}
+        for name, info in quota_rows.items():
+            if name not in homes or info['state']=='deleted':
+                continue
+            attached=len(lab.docker_client.containers.list(all=True,filters={'volume':name+'-quota'}))
+            attached+=len(lab.docker_client.containers.list(all=True,filters={'volume':name}))
+            result.append({**homes[name],**info,'attached':attached,'deletable':attached==0,'backend':'quota'})
         try:
             volumes = lab.docker_client.volumes.list(filters={'label':'linux-lab.storage=home-v1'})
             for volume in volumes:
                 home = homes.get(volume.name)
-                if home is None:
+                if home is None or volume.name in quota_rows:
                     continue
                 try:
                     storage.validate_home_volume(volume,home)
@@ -163,7 +172,7 @@ def make_router(lab):
                     result.append({**home,'attached':None,'deletable':False})
                     continue
                 attached = len(lab.docker_client.containers.list(all=True,filters={'volume':home['name']}))
-                result.append({**home,'attached':attached,'deletable':attached==0})
+                result.append({**home,'attached':attached,'deletable':attached==0,'backend':'legacy'})
         except APIError:
             raise HTTPException(503,'Could not inspect saved homes. Try again later.')
         return {'homes':result}
@@ -178,6 +187,17 @@ def make_router(lab):
                 classroom_scope(db,home['classroom_id'])
             if body.confirmation != 'DELETE ' + home['email']:
                 raise HTTPException(400,'Type DELETE followed by the exact student email to confirm.')
+            if storage.quota_enabled() and storage.quota_rpc('info',name=body.name)['state']!='absent':
+                details={'email':home['email'],'home':body.name,'template_id':home['template_id']}
+                write(lambda db: classroom_scope(db,home['classroom_id']),
+                      'membership.home_delete_requested',home['classroom_id'],details)
+                try:
+                    result=storage.quota_rpc('delete',name=body.name)
+                except HTTPException:
+                    write(lambda db: None,'membership.home_delete_failed',home['classroom_id'],details)
+                    raise
+                write(lambda db: None,'membership.home_deleted',home['classroom_id'],details)
+                return {'status':'deleted','name':body.name,**result}
             try:
                 volume = lab.docker_client.volumes.get(body.name)
             except NotFound:
@@ -282,12 +302,12 @@ def make_router(lab):
             for email in emails:
                 if not db.execute('SELECT 1 FROM classroom_memberships WHERE classroom_id=? AND email=?',(key,email)).fetchone():
                     raise HTTPException(400, 'Every email must already be enrolled in this classroom. Nothing was saved.')
-                db.execute("""INSERT INTO storage_entitlements(classroom_id,email,persistent,expires_at)
-                    VALUES (?,?,?,?) ON CONFLICT(classroom_id,email) DO UPDATE SET
-                    persistent=excluded.persistent, expires_at=excluded.expires_at""",
-                    (key,email,body.persistent,expiry))
+                db.execute("""INSERT INTO storage_entitlements(classroom_id,email,persistent,expires_at,limit_mb)
+                    VALUES (?,?,?,?,?) ON CONFLICT(classroom_id,email) DO UPDATE SET
+                    persistent=excluded.persistent, expires_at=excluded.expires_at, limit_mb=excluded.limit_mb""",
+                    (key,email,body.persistent,expiry,body.limit_mb))
         write(operation, 'membership.storage_changed',key,
-              {'emails':emails,'persistent':body.persistent,'expires_at':expiry})
+              {'emails':emails,'persistent':body.persistent,'expires_at':expiry,'limit_mb':body.limit_mb})
         return {'status':'saved','students':len(emails)}
 
     @router.post('/{kind}/{key}/enabled')

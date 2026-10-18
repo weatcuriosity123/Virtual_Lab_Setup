@@ -133,7 +133,7 @@ Expiry is checked every 15 seconds; inactivity every 10 seconds. Network outages
 
 See [scaling](docs/scaling.md) for sizing, measurements and a multi-host roadmap. **Do not increase Uvicorn workers or replicate this API as a scaling shortcut.** Its admission lock is process-local and it controls one Docker host with local SQLite and route files.
 
-This is a classroom prototype, not a hardened hostile-code sandbox. Containers share the host kernel and Docker bridge; the API has host Docker-socket access. See [operations and security](docs/operations.md) before wider deployment. A scoped admin dashboard is available. Opt-in persistent student homes are available for single-host pilot testing; hard disk quotas and backup recovery remain pending. There is no HA scheduler or fleet autoscaling.
+This is a classroom prototype, not a hardened hostile-code sandbox. Containers share the host kernel and Docker bridge; the API has host Docker-socket access. See [operations and security](docs/operations.md) before wider deployment. A scoped admin dashboard is available. Opt-in persistent student homes are available for single-host pilot testing; a quota-backed storage pilot is implemented, with host acceptance and backup recovery still pending. There is no HA scheduler or fleet autoscaling.
 
 ## Validation
 
