@@ -36,3 +36,28 @@ other writable Docker-managed mounts and runtime resource behaviour unvalidated.
 The network is deliberately offline, so internet-dependent initialization may
 also fail. This trial cannot prove complete filesystem coverage or production
 readiness. No portal install command is needed for this diagnostic.
+
+## First Pi result and adapted candidate
+
+The original candidate rejected root writes and enforced the 4 MiB mount, but
+startup failed: abc was UID 911, init-nginx wrote /etc/nginx and copied the
+selected dashboard into /usr/share/selkies/web. No desktop processes started.
+
+A separate build recipe now fixes abc to UID 1000 at build time, saves nginx
+configuration as an immutable seed, and redirects /etc/nginx to /run/lab-nginx.
+The init-nginx script copies the seed into that bounded temporary filesystem.
+Generated dashboard assets go to /run/lab-web; the original web path is a symlink.
+The build validates expected script markers and refuses a conflicting UID.
+No student volume is mounted or ownership changed on the host.
+
+```bash
+bash scripts/build-readonly-cse.sh
+python3 scripts/test-readonly-desktop.py --image linux-lab:cse-readonly-candidate
+```
+
+This uses the installed CSE image ID without package downloads; it does not
+replace linux-lab:cse-candidate or register a template. Other startup paths may
+still need adaptation. Send the new probe output before any portal deployment.
+Do not increase /run indefinitely if assets exceed its 64 MiB limit; inspect the
+assets and choose a documented bound. Production adoption still requires GUI,
+UID, persistent-home and complete writable-path acceptance.
