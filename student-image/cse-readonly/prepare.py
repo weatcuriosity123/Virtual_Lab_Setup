@@ -32,7 +32,16 @@ def main():
         except KeyError:
             conflict = None
         if conflict:
-            raise SystemExit('UID 1000 already belongs to another account; refusing to change it.')
+            # Only relocate the exact image-local account observed in the Pi base.
+            # Embedded Docker is disabled for classroom containers.
+            if conflict.pw_name != 'dockremap' or conflict.pw_dir != '/home/dockremap':
+                raise SystemExit('Unexpected UID 1000 owner; refusing to change it.')
+            occupied = {entry.pw_uid for entry in pwd.getpwall()}
+            replacement = next((uid for uid in range(20000, 21000) if uid not in occupied), None)
+            if replacement is None:
+                raise SystemExit('No free candidate UID for dockremap.')
+            subprocess.run(['usermod', '-u', str(replacement), 'dockremap'], check=True)
+            print(f'Relocated image-local dockremap to UID {replacement}.')
         subprocess.run(['usermod', '-u', '1000', 'abc'], check=True)
     if pwd.getpwnam('abc').pw_gid != 1000:
         raise SystemExit('Unexpected abc group; refusing to change it.')

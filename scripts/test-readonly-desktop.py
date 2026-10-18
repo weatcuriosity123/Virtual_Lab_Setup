@@ -18,7 +18,10 @@ def main():
     args=parser.parse_args()
     if run('docker','ps','-q','--filter','label=linux-lab.managed=true').stdout.strip():
         raise SystemExit('End active labs first so this probe does not compete for Pi memory.')
-    info=json.loads(run('docker','image','inspect',args.image).stdout)[0]
+    result=run('docker','image','inspect',args.image,check=False)
+    if result.returncode:
+        raise SystemExit('Candidate image is unavailable. Complete its build successfully before running this probe.')
+    info=json.loads(result.stdout)[0]
     declared=set((info['Config'].get('Volumes') or {}).keys())
     if declared-{'/config'}:
         raise SystemExit('Unexpected image volume declarations; inspect before testing: '+str(sorted(declared)))

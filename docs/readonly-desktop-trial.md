@@ -47,7 +47,11 @@ A separate build recipe now fixes abc to UID 1000 at build time, saves nginx
 configuration as an immutable seed, and redirects /etc/nginx to /run/lab-nginx.
 The init-nginx script copies the seed into that bounded temporary filesystem.
 Generated dashboard assets go to /run/lab-web; the original web path is a symlink.
-The build validates expected script markers and refuses a conflicting UID.
+The build validates expected script markers. The inspected base reserves UID 1000
+for dockremap; the candidate relocates that image-local account to an unused UID
+in 20000–20999 before assigning abc UID 1000. Unexpected conflicting accounts
+are rejected. Embedded Docker remains disabled; this candidate is not intended
+for Docker-in-Docker labs. Host user namespaces and host accounts are unchanged.
 No student volume is mounted or ownership changed on the host.
 
 ```bash
