@@ -11,6 +11,7 @@ from pathlib import Path
 import docker
 import classrooms
 import identity
+import storage
 from docker.errors import DockerException, NotFound
 from fastapi import FastAPI, HTTPException, Request as HttpRequest
 from fastapi.responses import JSONResponse
@@ -302,6 +303,8 @@ async def create_session(request: CreateSession):
         if occupied >= context["max_sessions"]:
             raise HTTPException(429, "All desktops for this classroom are in use. Try again later.")
 
+        home_options = storage.home_options(docker_client, context, identity.actor(), identity.MODE)
+
         try:
             docker_client.images.get(context["image"])
 
@@ -311,9 +314,7 @@ async def create_session(request: CreateSession):
                 detach=True,
                 network=DOCKER_NETWORK,
                 shm_size=f"{context['shm_mb']}m",
-                tmpfs={
-                    "/config": f"rw,size={context['home_mb']}m,mode=1777",
-                },
+                **home_options,
                 mem_limit=f"{context['memory_mb']}m",
                 nano_cpus=context["cpu_millis"] * 1_000_000,
                 pids_limit=context["pids"],

@@ -10,12 +10,13 @@ feedback, platform admin dashboard, bulk enrollment, admin activity history.
 
 1. **College-specific permissions: implemented and API-tested.** Deploy and
    complete the two-account acceptance test in [admin.md](admin.md).
-2. **Lab template readiness: next.** Build reproducible branch-specific images,
+2. **Lab template readiness: in validation.** Build reproducible branch-specific images,
    verify required tools/versions and hardware requirements, and test practicals.
    Existing Linux template remains the starting point. ROS2/Gazebo is not yet
    provided as a tested branch image.
-3. **Student work storage: pending.** Agree on persistence policy, quotas, ownership,
-   backups and restoration; current desktop work is temporary.
+3. **Student work storage: pilot implementation.** Opt-in verified student homes
+   are implemented; see [student-storage.md](student-storage.md). Live expiry and
+   isolation validation, hard quotas, backups and restoration remain pending.
 4. **Reliability and isolation: pending.** Reconcile after restarts, harden cleanup,
    network isolation and monitoring, and prove backup recovery.
 5. **Capacity validation: pending.** Measure concurrent desktop workloads and

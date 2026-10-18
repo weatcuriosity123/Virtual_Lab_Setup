@@ -50,7 +50,7 @@ iframe{width:100%;flex:1;min-height:0;border:0;background:#111}
     <input id="classCode" type="password" required autocomplete="off">
     <button id="startButton">Start Lab</button>
   </form>
-  <p class="muted">Your files and changes are deleted when the session ends.</p>
+  <p class="muted">Save your work before ending the lab. Home files survive only in classrooms with persistent storage enabled.</p>
   <p id="error" role="alert"></p>
 </section>
 
@@ -213,7 +213,7 @@ async function pollStatus() {
     deadline = started + Math.max(0, duration);
     updateClock();
     $("connection").textContent = duration > 0
-      ? "Session active · Changes are temporary"
+      ? "Session active · Save your work before ending"
       : "Time is up · Waiting for server cleanup…";
   } catch (error) {
     if (screen === "lab") {
@@ -275,7 +275,7 @@ $("fullscreenButton").onclick = async () => {
 };
 
 $("endButton").onclick = async () => {
-  if (ending || !confirm("End this lab? All session files and changes will be deleted.")) return;
+  if (ending || !confirm("End this lab? Unsaved work and temporary files will be lost. Saved home files are retained only for storage-enabled classrooms.")) return;
   ending = true;
   $("endButton").disabled = true;
   $("connection").textContent = "Ending your session…";

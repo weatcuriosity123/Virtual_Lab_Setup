@@ -233,3 +233,24 @@ assert client.post('/admin/colleges/new/admins',headers=admin_headers,json={'ema
 assert all(r['action']!='legacy.event' for r in client.get('/admin/overview',headers=faculty).json()['activity'])
 assert any(r['action']=='legacy.event' for r in client.get('/admin/overview',headers=admin_headers).json()['activity'])
 print('College admin isolation, assignment, revocation, feedback and session scope checks passed.')
+
+# Exercise persistent mounts through the actual session creation API.
+with classrooms.connect() as db:
+    db.execute("UPDATE sessions SET status='expired'")
+storage_context = dict(college_id='test', classroom_id='test-class', template_id='linux',
+    college_name='Test', classroom_name='Test Class', template_name='Linux',
+    image='test-linux:1', memory_mb=1536, cpu_millis=4000, shm_mb=256, home_mb=512,
+    pids=512, max_sessions=4, session_minutes=30)
+lab.docker_client.containers.list.return_value=[]
+lab.docker_client.volumes.get.side_effect=lab.NotFound('missing')
+lab.docker_client.volumes.create.side_effect=lambda **kw: SimpleNamespace(attrs={'Labels':kw['labels']})
+with patch.dict(os.environ, {'PERSISTENT_HOME_TEMPLATES':'linux'}), patch.object(lab, 'admission_context', return_value=storage_context):
+    created=client.post('/sessions',headers=headers(),json={'access_code':'class-secret'})
+    assert created.status_code==200,created.text
+    mounts=lab.docker_client.containers.run.call_args.kwargs
+    assert 'tmpfs' not in mounts and list(mounts['volumes'].values())==[{'bind':'/config','mode':'rw'}]
+    assert mounts['nano_cpus']==4000000000
+    lab.docker_client.containers.list.return_value=[object()]
+    duplicate=client.post('/sessions',headers=headers(),json={'access_code':'class-secret'})
+    assert duplicate.status_code==409,duplicate.text
+print('PASS: session API selects persistent mount and rejects simultaneous saved-home use')

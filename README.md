@@ -133,7 +133,7 @@ Expiry is checked every 15 seconds; inactivity every 10 seconds. Network outages
 
 See [scaling](docs/scaling.md) for sizing, measurements and a multi-host roadmap. **Do not increase Uvicorn workers or replicate this API as a scaling shortcut.** Its admission lock is process-local and it controls one Docker host with local SQLite and route files.
 
-This is a classroom prototype, not a hardened hostile-code sandbox. Containers share the host kernel and Docker bridge; the API has host Docker-socket access. See [operations and security](docs/operations.md) before wider deployment. There is no admin console, HA scheduler, fleet autoscaling or durable student home storage in this version.
+This is a classroom prototype, not a hardened hostile-code sandbox. Containers share the host kernel and Docker bridge; the API has host Docker-socket access. See [operations and security](docs/operations.md) before wider deployment. A scoped admin dashboard is available. Opt-in persistent student homes are available for single-host pilot testing; hard disk quotas and backup recovery remain pending. There is no HA scheduler or fleet autoscaling.
 
 ## Validation
 
@@ -159,3 +159,10 @@ student enrollment, running labs and recent feedback. See [dashboard setup](docs
 
 College administrators now have access limited to their assigned colleges. Platform
 admins grant/revoke assignments through `/admin`. See the [pilot roadmap](docs/roadmap.md).
+
+### Persistent student homes
+
+See [student storage](docs/student-storage.md) for opt-in CSE home persistence,
+identity isolation, deployment and live acceptance tests. The Pi pilot uses one
+lab at a time with a four-core CPU ceiling; VS Code UI tuning and production
+sandbox configuration are deferred, not considered solved.

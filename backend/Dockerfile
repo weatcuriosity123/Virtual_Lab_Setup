@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir \
     docker \
     "PyJWT[crypto]>=2.10,<3"
 
-COPY main.py classrooms.py identity.py admin.py /app/
+COPY main.py classrooms.py identity.py admin.py storage.py /app/
 
 EXPOSE 8000
 
