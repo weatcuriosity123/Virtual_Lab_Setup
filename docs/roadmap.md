@@ -22,7 +22,9 @@ feedback, platform admin dashboard, bulk enrollment, admin activity history.
    drill passed on the Pi; a Windows off-device archive was checksum-verified.
    Full replacement-host recovery and recurring backup operations remain pending. See [backup-recovery.md](backup-recovery.md).
 4. **Reliability and isolation: in progress.** Startup session reconciliation is
-   implemented and locally tested; complete [restart acceptance](restart-recovery.md).
+   implemented and locally tested; API restart, active-session host reboot,
+   capacity cleanup and saved-file recovery passed on the Pi on 2026-10-18.
+   See [restart acceptance](restart-recovery.md).
    Runtime reconciliation, network isolation, monitoring and whole-host recovery
    remain pending.
 5. **Capacity validation: pending.** Measure concurrent desktop workloads and
