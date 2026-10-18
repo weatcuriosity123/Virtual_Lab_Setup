@@ -16,6 +16,7 @@ stamp="$(date +%Y%m%d-%H%M%S)"
 backup_dir="$target_dir/classrooms-backup-$stamp"
 mkdir -p "$backup_dir/frontend" "$backup_dir/nginx"
 cp main.py Dockerfile "$backup_dir/"
+if [ -f .dockerignore ]; then cp .dockerignore "$backup_dir/"; fi
 cp frontend/*.html "$backup_dir/frontend/"
 if [ -f storage.py ]; then cp storage.py "$backup_dir/"; fi
 if [ -f admin.py ]; then cp admin.py "$backup_dir/"; fi
@@ -33,7 +34,7 @@ with sqlite3.connect(src) as a,sqlite3.connect(dst) as b:
     a.backup(b)
 print('Database backup:',dst)
 PY
-cp "$source_dir/backend/main.py" "$source_dir/backend/classrooms.py" "$source_dir/backend/identity.py" "$source_dir/backend/admin.py" "$source_dir/backend/storage.py" "$source_dir/backend/Dockerfile" .
+cp "$source_dir/backend/main.py" "$source_dir/backend/classrooms.py" "$source_dir/backend/identity.py" "$source_dir/backend/admin.py" "$source_dir/backend/storage.py" "$source_dir/backend/Dockerfile" "$source_dir/backend/.dockerignore" .
 cp "$source_dir/backend/frontend/"*.html frontend/
 cp "$source_dir/backend/nginx/default.conf" nginx/default.conf
 printf 'Source backup: %s\n' "$backup_dir"
