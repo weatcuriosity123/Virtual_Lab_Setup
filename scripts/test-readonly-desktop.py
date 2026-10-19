@@ -36,7 +36,7 @@ def main():
                  '--env','PUID=1000','--env','PGID=1000','--env','START_DOCKER=false','--env','TZ=Asia/Kolkata']
         for mount in ['/config:rw,size=512m,mode=1777', '/run:rw,exec,size=64m,mode=755',
                       '/tmp:rw,exec,size=128m,mode=1777', '/var/log:rw,size=16m,mode=755',
-                      '/quota-probe:rw,size=4m,mode=1777']:
+                      '/var/lib/nginx:rw,size=32m,mode=755', '/quota-probe:rw,size=4m,mode=1777']:
             command+=['--tmpfs',mount]
         command.append(info['Id'])
         cid=run(*command).stdout.strip()
@@ -44,20 +44,31 @@ def main():
         print('Offline probe: no ports, no saved homes, bounded temporary mounts.',flush=True)
         run('docker','start',cid)
         ready=False
-        for _ in range(30):
+        deadline=time.monotonic()+120
+        stable=0
+        while time.monotonic()<deadline:
             state=json.loads(run('docker','inspect','--format','{{json .State}}',cid).stdout)
             if not state['Running']:
                 print('Container exited. Exit code:',state['ExitCode'],'OOM:',state['OOMKilled'])
                 break
-            response=run('docker','exec',cid,'python3','-c',
-                         'import urllib.request; o=urllib.request.build_opener(urllib.request.ProxyHandler({})); assert o.open("http://127.0.0.1:3000/", timeout=1).status==200',check=False,timeout=5)
-            if response.returncode==0:
+            try:
+                response=run('docker','exec',cid,'python3','-c',
+                             "import urllib.request,pwd,subprocess; "
+                             "assert pwd.getpwnam('abc').pw_uid==1000; "
+                             "names=set(subprocess.check_output(['ps','-eo','comm'],text=True).split()); "
+                             "assert {'nginx','selkies','Xvfb','xfce4-session'}<=names, names; "
+                             "o=urllib.request.build_opener(urllib.request.ProxyHandler({})); "
+                             "assert o.open('http://127.0.0.1:3000/', timeout=1).status==200",check=False,timeout=5)
+                stable=stable+1 if response.returncode==0 else 0
+            except subprocess.TimeoutExpired:
+                stable=0
+            if stable>=3:
                 ready=True
                 break
             time.sleep(2)
         state=json.loads(run('docker','inspect','--format','{{json .State}}',cid).stdout)
         if state['Running']:
-            print(run('docker','exec',cid,'sh','-c','id abc; ps -eo comm | sort -u',check=False).stdout)
+            print(run('docker','exec',cid,'sh','-c','id abc; ps -eo comm | sort -u; df -h /run /tmp /var/lib/nginx /config',check=False).stdout)
             probe=run('docker','exec',cid,'python3','-c', '''import errno,os
 try:
     open('/usr/.linux-lab-ro-probe','w').close()
@@ -84,8 +95,8 @@ finally:
         print(run('docker','logs','--tail','100',cid,check=False).stdout)
         if not ready:
             raise SystemExit('NOT READY: read-only startup needs image changes. Production was not changed.')
-        print('PASS: desktop HTTP endpoint responds with read-only root.')
-        print('NOT YET ACCEPTED: browser, IDE, UID 1000, persistence and all writable paths still need validation.')
+        print('PASS: UID 1000, nginx, Selkies, Xvfb, XFCE and HTTP response passed three consecutive checks.')
+        print('NOT YET ACCEPTED: browser, IDE, persistence and all writable paths still need validation.')
     finally:
         if cid:
             result=run('docker','rm','-f','-v',cid,check=False)

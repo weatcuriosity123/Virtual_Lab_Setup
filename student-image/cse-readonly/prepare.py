@@ -13,7 +13,8 @@ def rewrite(source):
     # Keep static source dashboards immutable; only their generated copy is writable.
     source = source.replace('/usr/share/selkies/web', '/run/lab-web')
     prelude = '''# Candidate runtime configuration lives in bounded /run tmpfs.
-mkdir -p /run/lab-nginx /var/log/nginx
+mkdir -p /run/lab-nginx /run/lab-desktop /var/log/nginx
+chown 1000:1000 /run/lab-desktop
 cp -a /opt/cse-readonly/nginx/. /run/lab-nginx/
 '''
     return source.replace('# nginx Path', prelude + '\n# nginx Path', 1)
@@ -58,6 +59,10 @@ def main():
     if web.exists() or web.is_symlink():
         raise SystemExit('Unexpected generated dashboard in base image.')
     web.symlink_to('/run/lab-web', target_is_directory=True)
+    pid = Path('/de-pid')
+    if pid.exists() or pid.is_symlink():
+        raise SystemExit('Unexpected desktop PID file in base image.')
+    pid.symlink_to('/run/lab-desktop/de-pid')
     script.write_text(updated)
     subprocess.run(['bash', '-n', str(script)], check=True)
     print('Candidate prepared: UID 1000; runtime nginx and dashboard under /run.')

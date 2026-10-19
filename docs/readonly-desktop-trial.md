@@ -17,12 +17,14 @@ The script uses the already-installed `linux-lab:cse-candidate` image by immutab
 image ID. It does not pull/build images, change host filesystems, change firewall
 rules, connect to a network, publish a port, or attach saved homes. It creates one
 container with a read-only root and bounded tmpfs mounts for /config (512 MiB),
-/run (64 MiB, executable), /tmp (128 MiB), /var/log (16 MiB) and a 4 MiB write probe.
+/run (64 MiB, executable), /tmp (128 MiB), /var/log (16 MiB),
+/var/lib/nginx (32 MiB) and a 4 MiB write probe.
 Shared memory is 256 MiB; total memory is capped at 1536 MiB with no additional
 swap allowance. Logs are capped at 2 MiB. Unknown declared image volumes are
 rejected rather than silently creating unbounded volumes.
 
-It waits roughly one to two minutes for localhost HTTP readiness, reports the
+It waits up to roughly two minutes for three consecutive checks of UID 1000,
+nginx, Selkies, Xvfb, XFCE and localhost HTTP readiness, then reports the
 actual abc user ID and process names, confirms EROFS on root writes and ENOSPC on
 the disposable 4 MiB mount, and prints the last 100 startup log lines. Finally it
 removes only its own container and temporary data. On interruption, ordinary
@@ -65,3 +67,21 @@ still need adaptation. Send the new probe output before any portal deployment.
 Do not increase /run indefinitely if assets exceed its 64 MiB limit; inspect the
 assets and choose a documented bound. Production adoption still requires GUI,
 UID, persistent-home and complete writable-path acceptance.
+
+
+## Second Pi result: XFCE starts, nginx cache blocked
+
+The adapted image built successfully as 1b910caae8bd. UID/GID 1000, XFCE and
+Xvfb were observed; root EROFS and the 4 MiB ENOSPC checks passed. Nginx
+repeatedly failed to create /var/lib/nginx/body, and the desktop could not write
+/de-pid. This is still NOT READY, not acceptance of a working browser desktop.
+
+The probe now gives /var/lib/nginx a separate bounded 32 MiB tmpfs. The image
+maps /de-pid to /run/lab-desktop/de-pid, with that runtime directory owned by
+1000:1000. Existing readers continue using the original path. No root filesystem
+write access or additional capabilities are granted. A new build and probe use
+the same two commands above. No API installer or template changes are required.
+
+Startup also reported denied chmod/sed operations, an Openbox backup failure,
+a Steam symlink failure and an X11 socket-directory warning. These remain to
+review; fixing nginx alone does not establish GUI or security compatibility.
