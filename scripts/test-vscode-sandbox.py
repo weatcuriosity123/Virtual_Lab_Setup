@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Offline diagnostic only: try VS Code with a constrained namespace seccomp exceptions."""
+import argparse
 import hashlib
 import importlib.util
 import json
@@ -59,7 +60,34 @@ print(json.dumps(rows,indent=2))
 """
 
 
+TRACE_SUMMARY = """from pathlib import Path
+from collections import deque
+files=sorted(Path('/tmp').glob('code-syscalls.*'))
+print('Trace files:',len(files))
+remaining=160
+for path in files:
+    with path.open(errors='replace') as stream:
+        lines=deque((line.strip() for line in stream if any(k in line for k in ('EPERM','EACCES','EAGAIN','ENOMEM','ENOSPC','SIGSYS','clone(','clone3(','unshare('))),maxlen=40)
+    if lines and remaining:
+        print('---',path.name,'---')
+        for line in list(lines)[-remaining:]:
+            print(line[:1200]); remaining-=1
+"""
+
+
+def launch_command(trace):
+    prefix = ('timeout --signal=TERM --kill-after=3s 15s '
+              'strace -ff -tt -s 80 -e trace=process,unshare,setns,prctl,seccomp,chroot '
+              '-o /tmp/code-syscalls ' if trace else '')
+    return ('exec ' + prefix + 'code --disable-setuid-sandbox --disable-extensions --disable-gpu '
+            '--user-data-dir=/config/code-sandbox-probe --verbose '
+            '> /tmp/code-sandbox-probe.log 2>&1')
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--trace', action='store_true', help='Use separate debug image; tracing is diagnostic only')
+    args = parser.parse_args()
     version = run('docker', 'version', '--format', '{{.Server.Version}}').stdout.strip()
     if not version.startswith('26.1.5'):
         raise SystemExit('This diagnostic profile was reviewed for Docker 26.1.5 only; found ' + version)
@@ -69,7 +97,8 @@ def main():
         raise SystemExit('End the browser trial first.')
     spec = importlib.util.spec_from_file_location('trial', Path(__file__).with_name('trial-readonly-desktop.py'))
     trial = importlib.util.module_from_spec(spec); spec.loader.exec_module(trial)
-    info = json.loads(run('docker', 'image', 'inspect', 'linux-lab:cse-readonly-candidate').stdout)[0]
+    image = 'linux-lab:cse-readonly-debug' if args.trace else 'linux-lab:cse-readonly-candidate'
+    info = json.loads(run('docker', 'image', 'inspect', image).stdout)[0]
     if set(info['Config'].get('Volumes') or {}) - {'/config'}:
         raise SystemExit('Unexpected declared image volumes.')
     with urllib.request.urlopen(URL, timeout=30) as response:
@@ -102,13 +131,16 @@ def main():
             if result.returncode: raise SystemExit('Namespace prerequisite failed.')
             run('docker', 'exec', '--detach', '--user', '1000:1000',
                 '--env', 'HOME=/config', '--env', 'DISPLAY=:1', name, 'sh', '-c',
-                'exec code --disable-setuid-sandbox --disable-extensions --disable-gpu '
-                '--user-data-dir=/config/code-sandbox-probe --verbose '
-                '> /tmp/code-sandbox-probe.log 2>&1')
+                launch_command(args.trace))
             print('Waiting 20 seconds for VS Code renderer startup...', flush=True)
             time.sleep(20)
             print('--- VS Code log ---')
             print(run('docker', 'exec', name, 'tail', '-n', '100', '/tmp/code-sandbox-probe.log', check=False).stdout)
+            if args.trace:
+                print('--- Selected process/namespace syscall trace ---')
+                print(run('docker', 'exec', name, 'python3', '-c', TRACE_SUMMARY).stdout)
+                print('DIAGNOSTIC ONLY: tracing can change sandbox behavior. No launch acceptance inferred.')
+                return
             print('--- VS Code process and sandbox evidence ---')
             result = run('docker', 'exec', name, 'python3', '-c', INSPECT)
             print(result.stdout)

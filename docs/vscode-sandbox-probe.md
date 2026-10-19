@@ -25,3 +25,18 @@ The first Electron probe failed with “No usable sandbox” despite successful 
 Sources:
 - https://chromium.googlesource.com/chromium/src/+/lkgr/sandbox/linux/services/credentials.cc
 - https://chromium.googlesource.com/chromium/src/+/6718b706ff100957d755554cec783840a8f1f05b/sandbox/linux/services/namespace_sandbox.cc
+
+## Failed renderer fork: trace diagnostic
+
+The exact clone exceptions allowed startup to progress, but the Pi then reported `Zygote could not fork` and no surviving renderer. GPU/broker processes had two seccomp filters; this does not establish renderer sandbox success.
+
+Build a separate diagnostic image and run:
+
+```sh
+bash scripts/build-cse-debug.sh &&
+python3 scripts/test-vscode-sandbox.py --trace
+```
+
+The build installs strace in a new `linux-lab:cse-readonly-debug` image derived from the local candidate's immutable ID. It needs internet for Debian packages. Neither existing image tag nor classroom configuration is replaced. The runtime remains offline and uses the same test seccomp policy, no-new-privileges and capabilities as the untraced probe.
+
+Tracing runs as UID 1000 with a 15-second timeout, writes only to bounded temporary storage, and reports selected process/namespace calls and errors before cleanup. It does not add SYS_PTRACE. Ptrace restrictions or changes caused by tracing may prevent reproduction; any such result is diagnostic only. An eventual fix must be checked again without tracing.
