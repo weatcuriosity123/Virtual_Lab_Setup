@@ -13,6 +13,7 @@ os.environ.update(CLASS_ACCESS_CODE='test-code', SESSION_DB=work.name+'/sessions
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
 with patch('docker.from_env', return_value=MagicMock()):
     import main as lab
+lab.docker_client.images.get.side_effect = lambda ref: MagicMock(attrs={"Config": {}}, id=ref)
 
 lab.init_db()
 lab.init_db()  # migration must be repeatable

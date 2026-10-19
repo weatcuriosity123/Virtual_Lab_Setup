@@ -127,7 +127,7 @@ Existing desktop credentials remain valid. Multiple classroom codes, names and e
 
 Starting sessions reserve capacity for up to five minutes. HTTP readiness is checked before iframe loading. Two desktop-picture checks (or explicit manual confirmation) request activation. Picture detection is a browser heuristic, not an official Selkies first-frame event. Activation starts the usage deadline and inactivity record. Repeated activation does not extend expiry. Timed-out start requests can be retried in the same tab with the same request ID.
 
-Expiry is checked every 15 seconds; inactivity every 10 seconds. Network outages do not pause an active session. The installer-process exemption delays idle cleanup, but not the absolute session deadline. `/config` is temporary; students must export work before ending a lab.
+Expiry is checked every 15 seconds; inactivity every 10 seconds. Network outages do not pause an active session. The installer-process exemption delays idle cleanup, but not the absolute session deadline. `/config` is temporary unless the classroom has quota-backed persistent storage enabled.
 
 ## Scaling and limitations
 
@@ -163,9 +163,10 @@ admins grant/revoke assignments through `/admin`. See the [pilot roadmap](docs/r
 ### Persistent student homes
 
 See [student storage](docs/student-storage.md) for opt-in CSE home persistence,
-identity isolation, deployment and live acceptance tests. The Pi pilot uses one
-lab at a time with a four-core CPU ceiling; VS Code UI tuning and production
-sandbox configuration are deferred, not considered solved.
+identity isolation, deployment and live acceptance tests. The [CSE production
+release guide](docs/cse-production-release.md) covers building the tested
+read-only image, promoting it while preserving the template ID, portal acceptance
+and rollback. The Pi pilot uses one lab at a time with a four-core CPU ceiling.
 
 ### Storage backup and recovery
 

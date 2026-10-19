@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/share/code/bin/code --disable-setuid-sandbox --disable-extensions --disable-gpu "$@"

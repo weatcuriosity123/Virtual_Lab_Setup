@@ -18,6 +18,9 @@ mkdir -p "$backup_dir/frontend" "$backup_dir/nginx"
 cp main.py Dockerfile "$backup_dir/"
 if [ -f .dockerignore ]; then cp .dockerignore "$backup_dir/"; fi
 cp frontend/*.html "$backup_dir/frontend/"
+for file in desktop_runtime.py cse-seccomp.json; do
+  if [ -f "$file" ]; then cp "$file" "$backup_dir/"; fi
+done
 if [ -f disk_guard.py ]; then cp disk_guard.py "$backup_dir/"; fi
 if [ -f network_guard.py ]; then cp network_guard.py "$backup_dir/"; fi
 if [ -f storage.py ]; then cp storage.py "$backup_dir/"; fi
@@ -36,7 +39,7 @@ with sqlite3.connect(src) as a,sqlite3.connect(dst) as b:
     a.backup(b)
 print('Database backup:',dst)
 PY
-cp "$source_dir/backend/main.py" "$source_dir/backend/classrooms.py" "$source_dir/backend/identity.py" "$source_dir/backend/admin.py" "$source_dir/backend/storage.py" "$source_dir/backend/network_guard.py" "$source_dir/backend/disk_guard.py" "$source_dir/backend/Dockerfile" "$source_dir/backend/.dockerignore" .
+cp "$source_dir/backend/main.py" "$source_dir/backend/classrooms.py" "$source_dir/backend/identity.py" "$source_dir/backend/admin.py" "$source_dir/backend/storage.py" "$source_dir/backend/network_guard.py" "$source_dir/backend/disk_guard.py" "$source_dir/backend/desktop_runtime.py" "$source_dir/backend/cse-seccomp.json" "$source_dir/backend/Dockerfile" "$source_dir/backend/.dockerignore" .
 cp "$source_dir/backend/frontend/"*.html frontend/
 cp "$source_dir/backend/nginx/default.conf" nginx/default.conf
 printf 'Source backup: %s\n' "$backup_dir"
