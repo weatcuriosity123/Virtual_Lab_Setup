@@ -19,6 +19,7 @@ os.environ.update(SESSION_DB=work.name+'/db', SESSION_CONFIG_DIR=work.name+'/rou
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'backend'))
 with patch('docker.from_env',return_value=MagicMock()):
     import main as lab
+lab.docker_client.images.get.side_effect = lambda ref: MagicMock(attrs={"Config": {}}, id=ref)
 import identity
 import classrooms
 identity.validate_config()

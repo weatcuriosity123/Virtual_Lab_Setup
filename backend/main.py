@@ -14,6 +14,7 @@ import identity
 import storage
 import network_guard
 import disk_guard
+import desktop_runtime
 from docker.errors import DockerException, NotFound
 from fastapi import FastAPI, HTTPException, Request as HttpRequest
 from fastapi.responses import JSONResponse
@@ -352,24 +353,24 @@ async def create_session(request: CreateSession):
 
         await asyncio.to_thread(disk_guard.require_space, SESSION_DB)
         network_options = await asyncio.to_thread(network_guard.container_options, DOCKER_NETWORK)
+        selected_image = await asyncio.to_thread(docker_client.images.get, context["image"])
+        runtime_options = await asyncio.to_thread(desktop_runtime.options, docker_client, selected_image, context)
         home_options = await asyncio.to_thread(storage.home_options, docker_client, context, identity.actor(), identity.MODE)
+        desktop_options = desktop_runtime.merge_home(runtime_options, home_options)
 
         try:
-            docker_client.images.get(context["image"])
-
             docker_client.containers.run(
-                image=context["image"],
+                image=selected_image.id,
                 name=container_name,
                 detach=True,
                 log_config=docker.types.LogConfig(type="json-file", config={"max-size": "10m", "max-file": "3"}),
                 network=DOCKER_NETWORK,
                 shm_size=f"{context['shm_mb']}m",
-                **home_options,
+                **desktop_options,
                 **network_options,
                 mem_limit=f"{context['memory_mb']}m",
                 nano_cpus=context["cpu_millis"] * 1_000_000,
                 pids_limit=context["pids"],
-                security_opt=["no-new-privileges:true"],
                 environment={
                     "TZ": "Asia/Kolkata",
                     "PUID": "1000",

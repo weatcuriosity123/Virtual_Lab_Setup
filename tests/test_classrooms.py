@@ -23,6 +23,7 @@ with sqlite3.connect(os.environ['SESSION_DB']) as db:
                ('f'*32,'old-container','old-password',now.isoformat(),(now+timedelta(hours=1)).isoformat(),'active'))
 with patch('docker.from_env', return_value=MagicMock()):
     import main as lab
+lab.docker_client.images.get.side_effect = lambda ref: MagicMock(attrs={"Config": {}}, id=ref)
 import classrooms as catalog
 lab.init_db(); lab.init_db(); lab.init_idle_db()
 lab.reload_proxy = lambda: None
