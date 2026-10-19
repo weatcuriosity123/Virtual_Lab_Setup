@@ -40,3 +40,15 @@ python3 scripts/test-vscode-sandbox.py --trace
 The build installs strace in a new `linux-lab:cse-readonly-debug` image derived from the local candidate's immutable ID. It needs internet for Debian packages. Neither existing image tag nor classroom configuration is replaced. The runtime remains offline and uses the same test seccomp policy, no-new-privileges and capabilities as the untraced probe.
 
 Tracing runs as UID 1000 with a 15-second timeout, writes only to bounded temporary storage, and reports selected process/namespace calls and errors before cleanup. It does not add SYS_PTRACE. Ptrace restrictions or changes caused by tracing may prevent reproduction; any such result is diagnostic only. An eventual fix must be checked again without tracing.
+
+## Trace-confirmed renderer fork
+
+The Pi trace reproduced the renderer launch failure and recorded:
+
+```
+clone(..., flags=CLONE_NEWPID|SIGCHLD) = -1 EPERM
+```
+
+NEWUSER and combined USER/PID/NET clone calls succeeded earlier in the same trace. The next diagnostic profile adds only the exact `CLONE_NEWPID | SIGCHLD` value (0x20000011) on arm64/amd64. This exception is container-wide, not restricted to the renderer; it remains a private diagnostic policy. No additional capabilities, arbitrary clone arguments, clone3, mount or setns are enabled.
+
+Run `python3 scripts/test-vscode-sandbox.py` without `--trace` to verify the candidate under normal execution. No rebuild is needed. Any renderer evidence still requires review and subsequent GUI acceptance.

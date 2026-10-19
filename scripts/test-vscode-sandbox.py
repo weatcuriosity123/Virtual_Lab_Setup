@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline diagnostic only: try VS Code with a constrained namespace seccomp exceptions."""
+"""Offline diagnostic only: try VS Code with constrained namespace seccomp exceptions."""
 import argparse
 import hashlib
 import importlib.util
@@ -25,8 +25,9 @@ def make_profile(data):
     data['syscalls'].append({'names': ['unshare'], 'action': 'SCMP_ACT_ALLOW',
                             'args': [{'index': 0, 'value': 268435456, 'op': 'SCMP_CMP_EQ'}]})
     # Chromium checks support with clone(NEWUSER | SIGCHLD), then launches
-    # its sandbox with NEWUSER and optional NEWPID/NEWNET. No other flags.
-    for flags in (0x10000000, 0x30000000, 0x50000000, 0x70000000):
+    # its sandbox with NEWUSER and optional NEWPID/NEWNET. The Pi trace also
+    # showed the renderer fork requires exactly NEWPID | SIGCHLD.
+    for flags in (0x10000000, 0x20000000, 0x30000000, 0x50000000, 0x70000000):
         data['syscalls'].append({
             'names': ['clone'], 'action': 'SCMP_ACT_ALLOW',
             'includes': {'arches': ['arm64', 'amd64']},
