@@ -56,7 +56,7 @@ def main():
                              "import urllib.request,pwd,subprocess; "
                              "assert pwd.getpwnam('abc').pw_uid==1000; "
                              "names=set(subprocess.check_output(['ps','-eo','comm'],text=True).split()); "
-                             "assert {'nginx','selkies','Xvfb','xfce4-session'}<=names, names; "
+                             "assert {'nginx','selkies','pulseaudio','Xvfb','xfce4-session'}<=names, names; "
                              "o=urllib.request.build_opener(urllib.request.ProxyHandler({})); "
                              "assert o.open('http://127.0.0.1:3000/', timeout=1).status==200",check=False,timeout=5)
                 stable=stable+1 if response.returncode==0 else 0
@@ -68,7 +68,7 @@ def main():
             time.sleep(2)
         state=json.loads(run('docker','inspect','--format','{{json .State}}',cid).stdout)
         if state['Running']:
-            print(run('docker','exec',cid,'sh','-c','id abc; ps -eo comm | sort -u; df -h /run /tmp /var/lib/nginx /config',check=False).stdout)
+            print(run('docker','exec',cid,'sh','-c','id abc; ps -eo comm | sort -u; df -h /run /tmp /var/lib/nginx /config; ls -ld /defaults /defaults/pid /defaults/native /run/lab-defaults 2>/dev/null',check=False).stdout)
             probe=run('docker','exec',cid,'python3','-c', '''import errno,os
 try:
     open('/usr/.linux-lab-ro-probe','w').close()
@@ -95,7 +95,7 @@ finally:
         print(run('docker','logs','--tail','100',cid,check=False).stdout)
         if not ready:
             raise SystemExit('NOT READY: read-only startup needs image changes. Production was not changed.')
-        print('PASS: UID 1000, nginx, Selkies, Xvfb, XFCE and HTTP response passed three consecutive checks.')
+        print('PASS: UID 1000, nginx, Selkies, PulseAudio, Xvfb, XFCE and HTTP response passed three consecutive checks.')
         print('NOT YET ACCEPTED: browser, IDE, persistence and all writable paths still need validation.')
     finally:
         if cid:

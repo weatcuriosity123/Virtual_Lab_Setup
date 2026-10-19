@@ -20,6 +20,19 @@ cp -a /opt/cse-readonly/nginx/. /run/lab-nginx/
     return source.replace('# nginx Path', prelude + '\n# nginx Path', 1)
 
 
+def seed_defaults(source):
+    header = '#!/usr/bin/with-contenv bash\n'
+    if not source.startswith(header) or 'LSIO_READ_ONLY_FS' not in source:
+        raise ValueError('Unexpected init-adduser script; refusing to patch startup.')
+    # Runs before the normal user initialization and downstream desktop services.
+    bootstrap = """# Seed session-local defaults, including PulseAudio PID/socket paths.
+mkdir -p /run/lab-defaults || exit 1
+cp -a /opt/cse-readonly/defaults/. /run/lab-defaults/ || exit 1
+chown -R 1000:1000 /run/lab-defaults || exit 1
+"""
+    return header + bootstrap + source[len(header):]
+
+
 def main():
     script = Path('/etc/s6-overlay/s6-rc.d/init-nginx/run')
     original = script.read_text()
@@ -48,6 +61,20 @@ def main():
         raise SystemExit('Unexpected abc group; refusing to change it.')
     # These are image-owned paths; no student volume is attached during the build.
     subprocess.run(['chown', '-R', '1000:1000', '/app', '/defaults'], check=True)
+    adduser = Path('/etc/s6-overlay/s6-rc.d/init-adduser/run')
+    adduser_updated = seed_defaults(adduser.read_text())
+    defaults = Path('/defaults')
+    defaults_seed = Path('/opt/cse-readonly/defaults')
+    if defaults.is_symlink() or defaults_seed.exists():
+        raise SystemExit('Unexpected defaults layout; refusing to replace it.')
+    size = sum(p.stat().st_size for p in defaults.rglob('*') if p.is_file() and not p.is_symlink())
+    if size > 8 * 1024 * 1024:
+        raise SystemExit('Defaults seed exceeds 8 MiB; review /run memory budget first.')
+    shutil.copytree(defaults, defaults_seed, symlinks=True)
+    shutil.rmtree(defaults)
+    defaults.symlink_to('/run/lab-defaults', target_is_directory=True)
+    adduser.write_text(adduser_updated)
+    subprocess.run(['bash', '-n', str(adduser)], check=True)
     nginx = Path('/etc/nginx')
     seed = Path('/opt/cse-readonly/nginx')
     if nginx.is_symlink() or seed.exists():
@@ -65,7 +92,7 @@ def main():
     pid.symlink_to('/run/lab-desktop/de-pid')
     script.write_text(updated)
     subprocess.run(['bash', '-n', str(script)], check=True)
-    print('Candidate prepared: UID 1000; runtime nginx and dashboard under /run.')
+    print('Candidate prepared: UID 1000; runtime defaults, nginx and dashboard under /run.')
 
 
 if __name__ == '__main__':

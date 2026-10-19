@@ -85,3 +85,22 @@ the same two commands above. No API installer or template changes are required.
 Startup also reported denied chmod/sed operations, an Openbox backup failure,
 a Steam symlink failure and an X11 socket-directory warning. These remain to
 review; fixing nginx alone does not establish GUI or security compatibility.
+
+
+## Audio startup dependency
+
+The supplied svc-selkies script waits for /defaults/pid before attempting audio
+sink setup. The previous probe had no pulseaudio or selkies process. To allow
+normal audio startup without making the root filesystem writable, the candidate
+now copies /defaults into an immutable build-time seed and maps /defaults to
+/run/lab-defaults. An early init-adduser prelude restores that seed, owned by
+1000:1000, before downstream desktop startup. The build rejects an unexpected
+startup script or a seed larger than 8 MiB. Defaults, audio runtime files, nginx
+configuration and generated dashboard assets share the existing 64 MiB /run
+limit; no unlimited writable mount is introduced.
+
+The probe now also requires a pulseaudio process. It does not create a fake PID
+file or skip audio readiness. This tests the likely audio-path blocker; the
+actual PulseAudio runtime result still needs verification on the Pi. A passing
+process check does not prove browser audio works. Existing chmod/sed/Openbox
+warnings remain unresolved and production adoption is still pending.
