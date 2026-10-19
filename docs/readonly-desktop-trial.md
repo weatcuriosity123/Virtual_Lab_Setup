@@ -104,3 +104,13 @@ file or skip audio readiness. This tests the likely audio-path blocker; the
 actual PulseAudio runtime result still needs verification on the Pi. A passing
 process check does not prove browser audio works. Existing chmod/sed/Openbox
 warnings remain unresolved and production adoption is still pending.
+
+
+## PulseAudio diagnostics
+
+The runtime-defaults probe still had no PulseAudio PID or process. The supplied
+svc-pulseaudio launcher used log level 0 and redirected stdout and stderr to
+/dev/null, hiding the failure. The candidate now uses log level 2 and retains
+stderr in its bounded Docker logs. This is a diagnostic change, not a claimed
+fix or an audio bypass. The build refuses an unexpected launcher layout.
+Rebuild and rerun the same probe to capture the actual audio failure.

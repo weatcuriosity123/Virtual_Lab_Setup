@@ -33,6 +33,12 @@ chown -R 1000:1000 /run/lab-defaults || exit 1
     return header + bootstrap + source[len(header):]
 
 
+def enable_audio_diagnostics(source):
+    if source.count('--log-level=0') != 1 or source.count('> /dev/null 2>&1') != 1:
+        raise ValueError('Unexpected PulseAudio launcher; refusing to alter it.')
+    return source.replace('--log-level=0', '--log-level=2').replace('> /dev/null 2>&1', '')
+
+
 def main():
     script = Path('/etc/s6-overlay/s6-rc.d/init-nginx/run')
     original = script.read_text()
@@ -92,6 +98,9 @@ def main():
     pid.symlink_to('/run/lab-desktop/de-pid')
     script.write_text(updated)
     subprocess.run(['bash', '-n', str(script)], check=True)
+    audio = Path('/etc/s6-overlay/s6-rc.d/svc-pulseaudio/run')
+    audio.write_text(enable_audio_diagnostics(audio.read_text()))
+    subprocess.run(['bash', '-n', str(audio)], check=True)
     print('Candidate prepared: UID 1000; runtime defaults, nginx and dashboard under /run.')
 
 
