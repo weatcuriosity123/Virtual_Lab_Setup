@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """Twenty-minute disposable browser trial. No classroom or saved-home changes."""
 import argparse
+import base64
+import importlib.util
+import ipaddress
+from pathlib import Path
+import ssl
+import tempfile
+import urllib.request
 import json
 import os
 import secrets
@@ -47,6 +54,7 @@ assert opener.open(request,timeout=2).status==200
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--image', default='linux-lab:cse-readonly-candidate')
+    parser.add_argument('--vscode-sandbox', action='store_true', help='Private trial of tested namespace policy and VS Code launch')
     args = parser.parse_args()
     if run('docker', 'ps', '-q', '--filter', 'label=linux-lab.managed=true').stdout.strip():
         raise SystemExit('End active classroom labs before this trial.')
@@ -66,11 +74,26 @@ def main():
     print('Do not launch classroom labs during the trial.', flush=True)
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     attempted_network = attempted_container = False
+    profile_dir = None
+    probe = None
     try:
+        command = create_command(name, network, info['Id'])
+        i = command.index('--publish'); del command[i:i+2]
+        if args.vscode_sandbox:
+            if not run('docker', 'version', '--format', '{{.Server.Version}}').stdout.strip().startswith('26.1.5'):
+                raise SystemExit('Sandbox trial supports reviewed Docker 26.1.5 only.')
+            spec = importlib.util.spec_from_file_location('code_probe', Path(__file__).with_name('test-vscode-sandbox.py'))
+            probe = importlib.util.module_from_spec(spec); spec.loader.exec_module(probe)
+            with urllib.request.urlopen(probe.URL, timeout=30) as response:
+                profile = probe.make_profile(json.load(response))
+            profile_dir = tempfile.TemporaryDirectory(prefix='linux-lab-browser-profile-')
+            profile_path = Path(profile_dir.name) / 'seccomp.json'
+            profile_path.write_text(json.dumps(profile))
+            command[-1:-1] = ['--security-opt', 'seccomp=' + str(profile_path)]
         attempted_network = True
         run('docker', 'network', 'create', '--internal', network)
         attempted_container = True
-        run(*create_command(name, network, info['Id']), env=env)
+        run(*command, env=env)
         run('docker', 'start', name)
         deadline = time.monotonic() + 120
         stable = 0
@@ -83,7 +106,31 @@ def main():
         else:
             print(run('docker', 'logs', '--tail', '80', name, check=False).stdout)
             raise SystemExit('Desktop did not become ready; trial will be removed.')
-        print('READY: open https://localhost:13001 through your Windows SSH tunnel.', flush=True)
+        details = json.loads(run('docker', 'inspect', name).stdout)[0]
+        address = str(ipaddress.IPv4Address(details['NetworkSettings']['Networks'][network]['IPAddress']))
+        request = urllib.request.Request('https://' + address + ':3001/')
+        request.add_header('Authorization', 'Basic ' + base64.b64encode(('student:' + password).encode()).decode())
+        # Self-signed certificate on a newly created, local test container.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                   urllib.request.HTTPSHandler(context=ssl._create_unverified_context()))
+        with opener.open(request, timeout=5) as response:
+            if response.status != 200: raise RuntimeError('Host-to-desktop HTTPS check failed.')
+        if probe:
+            run('docker', 'exec', '--detach', '--user', '1000:1000',
+                '--env', 'HOME=/config', '--env', 'DISPLAY=:1', name, 'sh', '-c', probe.launch_command(False))
+            print('Starting VS Code with the tested namespace policy...', flush=True)
+            time.sleep(20)
+            evidence = run('docker', 'exec', name, 'python3', '-c', probe.INSPECT).stdout
+            rows = json.loads(evidence)
+            renderers = [r for r in rows if '--type=renderer' in r['command']]
+            if not renderers:
+                print(run('docker', 'exec', name, 'tail', '-n', '60', '/tmp/code-sandbox-probe.log', check=False).stdout)
+                raise SystemExit('No renderer observed; browser trial stopped.')
+            print('Renderer status:', json.dumps([r['status'] for r in renderers]), flush=True)
+        print('READY: host-to-container HTTPS passed. Open a second Windows terminal:', flush=True)
+        print('ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:13001:' + address + ':3001 YOUR_PI_USER@YOUR_PI_HOST', flush=True)
+        print('Replace YOUR_PI_USER@YOUR_PI_HOST with your usual Pi SSH login.', flush=True)
+        print('Open https://localhost:13001 in your Windows browser.', flush=True)
         print('Username: student\nPassword: ' + password, flush=True)
         print('Fresh temporary home; no internet on this internal trial network.', flush=True)
         print('All files in this trial are deleted on cleanup. Ctrl+C when finished.', flush=True)
@@ -109,6 +156,8 @@ def main():
                 except subprocess.TimeoutExpired:
                     cleanup_failed = True
                     print('Cleanup timed out. Run:', ' '.join(command))
+        if profile_dir:
+            profile_dir.cleanup()
         print('After cleanup: sudo python3 /usr/local/sbin/linux-lab-network-guard check')
         if cleanup_failed:
             raise SystemExit('Cleanup incomplete; resolve before launching classroom labs.')
