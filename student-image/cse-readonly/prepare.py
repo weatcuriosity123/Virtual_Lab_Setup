@@ -26,9 +26,10 @@ def seed_defaults(source):
         raise ValueError('Unexpected init-adduser script; refusing to patch startup.')
     # Runs before the normal user initialization and downstream desktop services.
     bootstrap = """# Seed session-local defaults, including PulseAudio PID/socket paths.
-mkdir -p /run/lab-defaults || exit 1
-cp -a /opt/cse-readonly/defaults/. /run/lab-defaults/ || exit 1
-chown -R 1000:1000 /run/lab-defaults || exit 1
+mkdir -p /defaults || exit 1
+cp -a /opt/cse-readonly/defaults/. /defaults/ || exit 1
+chown -R 1000:1000 /defaults || exit 1
+chmod 700 /defaults || exit 1
 """
     return header + bootstrap + source[len(header):]
 
@@ -77,8 +78,8 @@ def main():
     if size > 8 * 1024 * 1024:
         raise SystemExit('Defaults seed exceeds 8 MiB; review /run memory budget first.')
     shutil.copytree(defaults, defaults_seed, symlinks=True)
-    shutil.rmtree(defaults)
-    defaults.symlink_to('/run/lab-defaults', target_is_directory=True)
+    # Keep a real directory: PulseAudio rejects a symlink as its runtime path.
+    # The probe must cover this directory with a bounded tmpfs at container creation.
     adduser.write_text(adduser_updated)
     subprocess.run(['bash', '-n', str(adduser)], check=True)
     nginx = Path('/etc/nginx')
@@ -101,7 +102,7 @@ def main():
     audio = Path('/etc/s6-overlay/s6-rc.d/svc-pulseaudio/run')
     audio.write_text(enable_audio_diagnostics(audio.read_text()))
     subprocess.run(['bash', '-n', str(audio)], check=True)
-    print('Candidate prepared: UID 1000; runtime defaults, nginx and dashboard under /run.')
+    print('Candidate prepared: UID 1000; bounded runtime defaults; nginx and dashboard under /run.')
 
 
 if __name__ == '__main__':

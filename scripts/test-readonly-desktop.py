@@ -36,7 +36,7 @@ def main():
                  '--env','PUID=1000','--env','PGID=1000','--env','START_DOCKER=false','--env','TZ=Asia/Kolkata']
         for mount in ['/config:rw,size=512m,mode=1777', '/run:rw,exec,size=64m,mode=755',
                       '/tmp:rw,exec,size=128m,mode=1777', '/var/log:rw,size=16m,mode=755',
-                      '/var/lib/nginx:rw,size=32m,mode=755', '/quota-probe:rw,size=4m,mode=1777']:
+                      '/var/lib/nginx:rw,size=32m,mode=755', '/defaults:rw,size=16m,mode=700,uid=1000,gid=1000', '/quota-probe:rw,size=4m,mode=1777']:
             command+=['--tmpfs',mount]
         command.append(info['Id'])
         cid=run(*command).stdout.strip()
@@ -68,7 +68,7 @@ def main():
             time.sleep(2)
         state=json.loads(run('docker','inspect','--format','{{json .State}}',cid).stdout)
         if state['Running']:
-            print(run('docker','exec',cid,'sh','-c','id abc; ps -eo comm | sort -u; df -h /run /tmp /var/lib/nginx /config; ls -ld /defaults /defaults/pid /defaults/native /run/lab-defaults 2>/dev/null',check=False).stdout)
+            print(run('docker','exec',cid,'sh','-c','id abc; ps -eo comm | sort -u; df -h /run /tmp /var/lib/nginx /config /defaults; ls -ld /defaults /defaults/pid /defaults/native 2>/dev/null',check=False).stdout)
             probe=run('docker','exec',cid,'python3','-c', '''import errno,os
 try:
     open('/usr/.linux-lab-ro-probe','w').close()

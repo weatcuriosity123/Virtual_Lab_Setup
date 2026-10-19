@@ -18,7 +18,7 @@ image ID. It does not pull/build images, change host filesystems, change firewal
 rules, connect to a network, publish a port, or attach saved homes. It creates one
 container with a read-only root and bounded tmpfs mounts for /config (512 MiB),
 /run (64 MiB, executable), /tmp (128 MiB), /var/log (16 MiB),
-/var/lib/nginx (32 MiB) and a 4 MiB write probe.
+/var/lib/nginx (32 MiB), /defaults (16 MiB) and a 4 MiB write probe.
 Shared memory is 256 MiB; total memory is capped at 1536 MiB with no additional
 swap allowance. Logs are capped at 2 MiB. Unknown declared image volumes are
 rejected rather than silently creating unbounded volumes.
@@ -114,3 +114,18 @@ svc-pulseaudio launcher used log level 0 and redirected stdout and stderr to
 stderr in its bounded Docker logs. This is a diagnostic change, not a claimed
 fix or an audio bypass. The build refuses an unexpected launcher layout.
 Rebuild and rerun the same probe to capture the actual audio failure.
+
+
+## Correction: PulseAudio requires a real runtime directory
+
+The diagnostic run exposed `Failed to create secure directory (/defaults): Too
+many levels of symbolic links`. The /defaults symlink approach described above
+is superseded: the image now retains a real /defaults directory and the probe
+mounts a 16 MiB tmpfs directly there. Early initialization copies the immutable
+seed into that mount, sets UID/GID 1000 and mode 0700. PulseAudio's secure-path
+check remains enabled. /run keeps its separate 64 MiB limit. This adds a bounded
+16 MiB allocation ceiling, not an unrestricted writable path.
+
+Rebuild the candidate and use the updated probe together; the old probe lacks
+the required mount. This correction still requires actual Pi startup validation,
+followed by GUI/audio and saved-home acceptance before production use.
