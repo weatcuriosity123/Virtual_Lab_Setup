@@ -8,7 +8,7 @@ End classroom and browser trials, then run:
 python3 scripts/test-vscode-sandbox.py
 ```
 
-No image rebuild is required. The script downloads the upstream Moby v26.1.5 profile over HTTPS and verifies its canonical JSON SHA-256 before adding just that one exception. The installed Debian Docker build may differ from upstream; this is a diagnostic policy, not a replacement production default. Other Docker versions are refused.
+No image rebuild is required. The script downloads the upstream Moby v26.1.5 profile over HTTPS and verifies its canonical JSON SHA-256 before adding constrained namespace exceptions. The installed Debian Docker build may differ from upstream; this is a diagnostic policy, not a replacement production default. Other Docker versions are refused.
 
 The desktop runs offline with a fresh temporary home, read-only root, bounded tmpfs mounts, resource and log limits, no-new-privileges, and no added capabilities. No production policy is updated. It runs VS Code with `--disable-setuid-sandbox` to investigate the namespace sandbox route, never `--no-sandbox`. Disabling the SUID helper does not itself prove that another sandbox is active.
 
@@ -17,3 +17,11 @@ After 20 seconds it prints startup logs and surviving Code process information: 
 Normal exit and Ctrl+C remove the disposable container and profile. On a hard interruption, remove only the printed `linux-lab-code-probe-*` container. No saved homes are mounted. The probe needs host internet access only to download the reviewed profile; the test container has no network.
 
 Source: https://github.com/moby/moby/blob/v26.1.5/profiles/seccomp/default.json
+
+## Clone follow-up
+
+The first Electron probe failed with “No usable sandbox” despite successful unshare. Chromium's `Credentials::CanCreateProcessInNewUserNS` first uses clone(NEWUSER | SIGCHLD), which the original test did not permit. The follow-up adds four exact clone flag combinations: NEWUSER with optional NEWPID/NEWNET, always SIGCHLD, only on arm64/amd64. It does not allow arbitrary clone flags, clone3, setns or mount, and adds no capabilities. This is a source-informed hypothesis, not proof that all remaining launch requirements are satisfied.
+
+Sources:
+- https://chromium.googlesource.com/chromium/src/+/lkgr/sandbox/linux/services/credentials.cc
+- https://chromium.googlesource.com/chromium/src/+/6718b706ff100957d755554cec783840a8f1f05b/sandbox/linux/services/namespace_sandbox.cc

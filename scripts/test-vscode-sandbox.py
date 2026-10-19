@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline diagnostic only: try VS Code with a single user-namespace seccomp exception."""
+"""Offline diagnostic only: try VS Code with a constrained namespace seccomp exceptions."""
 import hashlib
 import importlib.util
 import json
@@ -23,6 +23,14 @@ def make_profile(data):
     data = json.loads(encoded)
     data['syscalls'].append({'names': ['unshare'], 'action': 'SCMP_ACT_ALLOW',
                             'args': [{'index': 0, 'value': 268435456, 'op': 'SCMP_CMP_EQ'}]})
+    # Chromium checks support with clone(NEWUSER | SIGCHLD), then launches
+    # its sandbox with NEWUSER and optional NEWPID/NEWNET. No other flags.
+    for flags in (0x10000000, 0x30000000, 0x50000000, 0x70000000):
+        data['syscalls'].append({
+            'names': ['clone'], 'action': 'SCMP_ACT_ALLOW',
+            'includes': {'arches': ['arm64', 'amd64']},
+            'args': [{'index': 0, 'value': flags | 17, 'op': 'SCMP_CMP_EQ'}]
+        })
     return data
 
 
@@ -38,8 +46,7 @@ for p in root.iterdir():
     if not p.name.isdigit(): continue
     try:
         cmd=(p/'cmdline').read_bytes().replace(b'\\0',b' ').decode(errors='replace')
-        exe=(p/'exe').readlink().as_posix()
-        if not exe.startswith('/usr/share/code/'): continue
+        if not cmd.startswith('/usr/share/code/'): continue
         status=dict(line.split(':',1) for line in (p/'status').read_text().splitlines() if ':' in line)
         ns={}
         for n in ('user','pid','net'):
