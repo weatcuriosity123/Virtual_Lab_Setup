@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir \
     docker \
     "PyJWT[crypto]>=2.10,<3"
 
-COPY main.py classrooms.py identity.py admin.py storage.py network_guard.py disk_guard.py desktop_runtime.py cse-seccomp.json /app/
+COPY main.py classrooms.py identity.py admin.py storage.py network_guard.py disk_guard.py desktop_runtime.py packet_capture.py cse-seccomp.json /app/
 
 EXPOSE 8000
 

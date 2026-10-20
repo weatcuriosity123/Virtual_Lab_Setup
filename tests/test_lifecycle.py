@@ -47,6 +47,12 @@ async def run():
     assert (await lab.lab_status(token, password))['remaining_seconds'] == 0
     assert not (await lab.record_lab_activity(token, password))['tracking']
     await expect_error(403, lab.desktop_readiness(token, 'wrong'))
+    with patch.object(lab.packet_capture, 'capture') as capture_call:
+        await expect_error(403, lab.capture_lab(token, 'wrong'))
+        capture_call.assert_not_called()
+    with patch.object(lab.identity, 'require_owner', side_effect=lab.HTTPException(403, 'Wrong owner')), patch.object(lab.packet_capture, 'capture') as capture_call:
+        await expect_error(403, lab.capture_lab(token, password))
+        capture_call.assert_not_called()
     lab.desktop_http_ready = lambda row: False
     await expect_error(503, lab.activate_desktop(token, password))
     lab.desktop_http_ready = lambda row: True

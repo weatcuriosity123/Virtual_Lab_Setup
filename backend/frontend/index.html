@@ -61,11 +61,13 @@ iframe{width:100%;flex:1;min-height:0;border:0;background:#111}
     <div>Time remaining <strong id="clock">--:--</strong></div>
     <div class="actions">
       <button id="credentialsButton" class="secondary">Credentials</button>
+      <button id="captureButton" class="secondary">Capture Traffic</button>
       <button id="fullscreenButton" class="secondary">Fullscreen</button>
       <button id="endButton" class="danger">End Lab</button>
     </div>
   </header>
   <div id="connection" role="status">Checking session…</div>
+  <div id="captureStatus" role="status" hidden style="padding:8px 18px"></div>
   <div id="storageSummary" role="status">Checking storage…</div>
   <div id="credentials" hidden>
     Username: <strong>student</strong> ·
@@ -150,7 +152,7 @@ async function readResponse(response) {
   return data;
 }
 
-async function api(path, method = "GET", body) {
+async function api(path, method = "GET", body, timeoutMs = 20000) {
   const headers = {};
   if (session) headers["X-Session-Password"] = session.desktop_password;
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -160,7 +162,7 @@ async function api(path, method = "GET", body) {
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
-    signal: AbortSignal.timeout(20000)
+    signal: AbortSignal.timeout(timeoutMs)
   });
 
   const data = await readResponse(response);
@@ -182,6 +184,7 @@ function updateClock() {
 }
 
 function showFeedback(status) {
+  $("captureStatus").hidden = true;
   startupGeneration++;
   desktopReady = false;
   document.getElementById("startupPanel")?.remove();
@@ -278,6 +281,24 @@ $("startForm").addEventListener("submit", async event => {
 
 $("credentialsButton").onclick = () => {
   $("credentials").hidden = !$("credentials").hidden;
+};
+
+$("captureButton").onclick = async () => {
+  if (!session || ending) return;
+  const token = session.session_id;
+  $("captureStatus").hidden = false;
+  $("captureButton").disabled = true;
+  $("captureStatus").textContent = "Capturing lab traffic for up to 10 seconds…";
+  try {
+    const data = await api(`/lab/${token}/capture`, "POST", undefined, 60000);
+    if (session?.session_id === token && !ending) {
+      $("captureStatus").textContent = `Capture saved: ${data.path}. Open it using Wireshark → File → Open. Captures are temporary and replace the previous capture.`;
+    }
+  } catch (error) {
+    if (session?.session_id === token && !ending) $("captureStatus").textContent = error.message;
+  } finally {
+    $("captureButton").disabled = false;
+  }
 };
 
 $("fullscreenButton").onclick = async () => {

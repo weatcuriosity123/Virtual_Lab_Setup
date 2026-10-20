@@ -15,6 +15,7 @@ import storage
 import network_guard
 import disk_guard
 import desktop_runtime
+import packet_capture
 from docker.errors import DockerException, NotFound
 from fastapi import FastAPI, HTTPException, Request as HttpRequest
 from fastapi.responses import JSONResponse
@@ -185,6 +186,7 @@ def delete_session(token: str):
         if row is None:
             return
 
+        packet_capture.cleanup(docker_client, token)
         delete_container(row["container_name"])
         (CONFIG_DIR / f"{token}.conf").unlink(missing_ok=True)
 
@@ -276,6 +278,7 @@ def reconcile_sessions():
 async def startup():
     identity.validate_config()
     init_db()
+    packet_capture.cleanup(docker_client)
     reconcile_sessions()
     app.state.expiry_task = asyncio.create_task(expiry_worker())
 
@@ -522,6 +525,12 @@ async def lab_status(
                 remaining if row["status"] == "active" else 0
             ),
         }
+
+
+@app.post("/lab/{token}/capture")
+async def capture_lab(token: str, x_session_password: str = Header(...)):
+    row = authorize_lab_session(token, x_session_password)
+    return await asyncio.to_thread(packet_capture.capture, docker_client, dict(row))
 
 
 @app.get("/lab/{token}/storage")
