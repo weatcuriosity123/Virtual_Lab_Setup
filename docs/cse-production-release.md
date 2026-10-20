@@ -22,6 +22,11 @@ closed when the storage, network, Docker-version or seccomp checks are missing.
 
 ## Build, install and promote
 
+The wallpaper binary is supplied separately on the build host. Copy the approved
+PNG to `student-image/cse-production/curiosity4u-wallpaper.png` before building.
+The build refuses if that file is missing. This avoids sending a large binary
+through the GitHub chat connector; the resulting Docker image still includes it.
+
 Run these commands on the Pi from the repository checkout. The release build
 uses the candidate image already tested on this host and does not need network
 access. The installer backs up the current API source and database before
@@ -52,6 +57,17 @@ quota backend, resource limits and seccomp profile before changing the
 template. It records the previous image ID in the application database.
 
 ## Portal acceptance
+
+The production image includes the Curiosity4u wallpaper. An XFCE autostart
+entry applies it at every desktop login, including existing saved homes.
+It changes only wallpaper properties, disables wallpaper cycling, and uses
+scaled mode to keep the entire image visible (different aspect ratios may
+show borders). Students can change the background during a session; the
+classroom background is restored on the next desktop login.
+After rebuilding and promoting, start a new lab to see the change; already
+running containers do not receive image changes. Verify the wallpaper in
+both a fresh home and an existing saved home and confirm it survives ending
+and recreating the lab. Runtime visual verification must be performed on the Pi.
 
 Before opening the classroom to students, use the portal to start one lab with
 the existing test account and verify:

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+if [ ! -s "$source_dir/student-image/cse-production/curiosity4u-wallpaper.png" ]; then
+  echo 'Copy your wallpaper to student-image/cse-production/curiosity4u-wallpaper.png before building.' >&2
+  exit 1
+fi
 if [ -n "$(docker ps -q --filter label=linux-lab.managed=true)" ]; then
   echo 'End classroom labs first.' >&2; exit 1
 fi

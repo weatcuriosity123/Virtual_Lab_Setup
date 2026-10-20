@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Curiosity4u classroom background
+Exec=/usr/bin/python3 /opt/cse-readonly/set-wallpaper.py
+OnlyShowIn=XFCE;
+Terminal=false
+StartupNotify=false
