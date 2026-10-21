@@ -35,3 +35,14 @@ with patch.dict(r.os.environ,{'LAB_NETWORK_ISOLATION':'required','PERSISTENT_STO
 assert r.options(client,SimpleNamespace(attrs={'Config':{}}),{})=={'security_opt':['no-new-privileges:true']}
 rejected(lambda:r.options(client,SimpleNamespace(attrs={'Config':{'Labels':{'lab.runtime.profile':'unknown'}}}),context))
 print('PASS: runtime limits, profile integrity, storage merge, version and network gates; legacy unchanged.')
+
+lite=SimpleNamespace(attrs={'Config':{'Labels':{'lab.runtime.profile':r.LITE_PROFILE}}})
+small={'memory_mb':768,'shm_mb':128,'pids':256}
+with patch.dict(r.os.environ,{'LAB_NETWORK_ISOLATION':'required','PERSISTENT_STORAGE_BACKEND':'quota'}):
+    runtime=r.options(client,lite,small)
+    assert runtime['read_only'] and runtime['memswap_limit']=='768m'
+    assert runtime['security_opt'][1].startswith('seccomp=')
+    for key in small:
+        rejected(lambda:r.options(client,lite,{**small,key:small[key]-1}))
+    rejected(lambda:r.options(client,image,small))
+print('PASS: lite profile uses separate resource minima without weakening CSE limits')

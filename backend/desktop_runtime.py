@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 PROFILE = 'cse-readonly-v1'
+LITE_PROFILE = 'programming-lite-readonly-v1'
 PROFILE_SHA256 = '8500a19ef4bb3de486aea6116debfc8f2c039f40c773a09b254176b3ea0ab78c'
 RUNTIME_TMPFS = {
     '/run': 'rw,exec,size=64m,mode=755',
@@ -21,14 +22,15 @@ def options(client, image, context):
     profile = labels.get('lab.runtime.profile')
     if not profile:
         return {'security_opt': ['no-new-privileges:true']}
-    if profile != PROFILE:
+    if profile not in (PROFILE, LITE_PROFILE):
         raise HTTPException(503, 'Unsupported desktop runtime profile.')
     if os.getenv('LAB_NETWORK_ISOLATION') != 'required':
-        raise HTTPException(503, 'Read-only CSE requires network isolation.')
+        raise HTTPException(503, 'Read-only desktops require network isolation.')
     if not client.version()['Version'].startswith('26.1.5'):
         raise HTTPException(503, 'Desktop sandbox requires review for this Docker version.')
-    if context['memory_mb'] < 1536 or context['shm_mb'] < 256 or context['pids'] < 512:
-        raise HTTPException(503, 'Read-only CSE requires its tested resource limits.')
+    minimum = (1536, 256, 512) if profile == PROFILE else (768, 128, 256)
+    if any(context[key] < limit for key,limit in zip(('memory_mb','shm_mb','pids'), minimum)):
+        raise HTTPException(503, 'Read-only desktop resources are below the profile minimum.')
     try:
         data = json.loads(Path(__file__).with_name('cse-seccomp.json').read_text())
         encoded = json.dumps(data, sort_keys=True, separators=(',', ':'))
