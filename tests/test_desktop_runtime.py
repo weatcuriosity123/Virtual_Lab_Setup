@@ -46,3 +46,28 @@ with patch.dict(r.os.environ,{'LAB_NETWORK_ISOLATION':'required','PERSISTENT_STO
         rejected(lambda:r.options(client,lite,{**small,key:small[key]-1}))
     rejected(lambda:r.options(client,image,small))
 print('PASS: lite profile uses separate resource minima without weakening CSE limits')
+
+import sqlite3
+with sqlite3.connect(':memory:') as db, patch.dict(r.os.environ,{'LAB_CAPACITY_MODE':'pi-lite3'}):
+    db.execute('CREATE TABLE sessions(status TEXT,capacity_units INTEGER)')
+    lite_context={**small,'cpu_millis':1000,'home_mb':128}
+    assert r.admission_units(db,lite,lite_context)==1
+    db.execute("INSERT INTO sessions VALUES ('starting',1),('active',1)")
+    assert r.admission_units(db,lite,lite_context)==1
+    def full(image,ctx):
+        try:r.admission_units(db,image,ctx)
+        except HTTPException as exc:assert exc.status_code==429
+        else:raise AssertionError('Over-capacity admitted')
+    full(image,lite_context)
+    full(lite,{**lite_context,'memory_mb':1024})
+    db.execute("INSERT INTO sessions VALUES ('active',1)")
+    full(lite,lite_context)
+    db.execute('DELETE FROM sessions')
+    assert r.admission_units(db,image,context)==3
+    db.execute("INSERT INTO sessions VALUES ('active',3)")
+    full(lite,lite_context);full(image,context)
+    db.execute("UPDATE sessions SET capacity_units=NULL")
+    full(lite,lite_context)
+    db.execute("UPDATE sessions SET status='expired'")
+    assert r.admission_units(db,lite,lite_context)==1
+print('PASS: Pi admission allows 3 lite OR 1 other, counts startup/legacy reservations, and treats enlarged lite templates as heavy')

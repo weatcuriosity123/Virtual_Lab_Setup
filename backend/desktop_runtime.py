@@ -55,3 +55,21 @@ def merge_home(runtime, home):
     if runtime.get('tmpfs') or home.get('tmpfs'):
         result['tmpfs'] = {**runtime.get('tmpfs', {}), **home.get('tmpfs', {})}
     return result
+
+
+def admission_units(db, image, context):
+    """Single-worker Pi policy: three bounded lite labs OR one other desktop."""
+    mode = os.getenv('LAB_CAPACITY_MODE','standard')
+    if mode not in ('standard','pi-lite3'):
+        raise HTTPException(503,'Unknown host capacity policy.')
+    labels = image.attrs.get('Config',{}).get('Labels') or {}
+    bounded_lite = labels.get('lab.runtime.profile') == LITE_PROFILE and all(
+        context[key] <= limit for key,limit in (
+            ('memory_mb',768),('cpu_millis',1000),('shm_mb',128),('home_mb',128),('pids',256)))
+    units = 1 if bounded_lite else 3
+    if mode == 'pi-lite3':
+        occupied = db.execute("""SELECT COALESCE(SUM(COALESCE(capacity_units,3)),0)
+            FROM sessions WHERE status IN ('active','starting')""").fetchone()[0]
+        if occupied + units > 3:
+            raise HTTPException(429,'This Pi supports three lightweight labs or one other lab. End existing labs before switching types.')
+    return units

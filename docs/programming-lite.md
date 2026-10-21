@@ -58,3 +58,28 @@ remain unchanged. Test two students first, then three if measured headroom allow
 Restore the one-seat global limit before re-enabling heavy classrooms. Mixed-template
 RAM/CPU-aware admission is not implemented by college seat plans and remains future
 work. Do not advertise three concurrent full CSE desktops from a lite-only test.
+
+## Enforced Pi mixed-capacity mode
+
+With the matching API installed, `scripts/enable-pi-lite-capacity.sh` registers the
+accepted candidate by immutable ID, backs up the DB and .env, caps existing heavy
+classrooms at one and configures MAX_SESSIONS=3 / LAB_CAPACITY_MODE=pi-lite3. It stops
+the API during configuration and refuses active student containers/session records.
+It does not change college plans or create a classroom/code/student enrollment.
+
+This mode replaces the temporary heavy-classroom disabling procedure above: three
+bounded lite desktops OR one other desktop may run, never both kinds together.
+Every session snapshots its capacity units at admission: lite consumes 1 and every
+other profile consumes all 3. Old sessions default to 3. Starting sessions count.
+The lite exception requires the image profile plus limits no greater than 768 MiB
+RAM, 1000 CPU millis, 128 MiB shm, 128 MiB temporary home, and 256 tasks. Increasing
+those values makes that template consume all capacity. Existing CSE RAM/task limits
+are unchanged. The new lightweight minimum and runtime smoke still need Pi acceptance.
+
+Create the new classroom with three slots in the portal. A configured college plan
+must explicitly permit the lite template and three seats; its hours/storage rules
+still apply. This is an opt-in, single-host/single-API-worker Pi policy, not general
+memory-aware cloud scheduling. Do not run additional API workers with this mode.
+A code rollback to an API without the guard requires restoring MAX_SESSIONS=1 first.
+To return safely to the old trial, set MAX_SESSIONS=1 and recreate the API. Keeping
+LAB_CAPACITY_MODE=pi-lite3 at one global seat remains restrictive and safe.

@@ -102,7 +102,7 @@ def init_db():
             "session_minutes": "INTEGER", "college_name": "TEXT",
             "owner_subject": "TEXT", "owner_email": "TEXT",
             "classroom_name": "TEXT", "template_name": "TEXT",
-            "home_volume": "TEXT",
+            "home_volume": "TEXT", "capacity_units": "INTEGER NOT NULL DEFAULT 3",
         }.items():
             if name not in columns:
                 db.execute(f"ALTER TABLE sessions ADD COLUMN {name} {kind}")
@@ -360,6 +360,8 @@ async def create_session(request: CreateSession):
         network_options = await asyncio.to_thread(network_guard.container_options, DOCKER_NETWORK)
         selected_image = await asyncio.to_thread(docker_client.images.get, context["image"])
         runtime_options = await asyncio.to_thread(desktop_runtime.options, docker_client, selected_image, context)
+        with closing(connect_db()) as db:
+            capacity_units = desktop_runtime.admission_units(db, selected_image, context)
         now = datetime.now(timezone.utc)
         expires = now + timedelta(minutes=5)
         await asyncio.to_thread(plans.reserve, token, context, now)
@@ -404,8 +406,8 @@ async def create_session(request: CreateSession):
                     (token, container_name, password,
                      created_at, expires_at, status, request_id, college_id, classroom_id,
                      template_id, session_minutes, college_name, classroom_name, template_name,
-                     owner_subject, owner_email, home_volume)
-                    VALUES (?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     owner_subject, owner_email, home_volume, capacity_units)
+                    VALUES (?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     token,
                     container_name,
@@ -417,7 +419,7 @@ async def create_session(request: CreateSession):
                     context["classroom_name"], context["template_name"],
                     identity.actor().subject if identity.actor() else None,
                     identity.actor().email if identity.actor() else None,
-                    next(iter(home_options.get("volumes",{})), None),
+                    next(iter(home_options.get("volumes",{})), None), capacity_units,
                 ))
                 db.commit()
 
