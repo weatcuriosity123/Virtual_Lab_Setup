@@ -6,6 +6,7 @@ import socket
 from contextlib import closing
 from datetime import datetime, timezone
 import classrooms
+import plans
 from types import SimpleNamespace
 
 from docker.errors import NotFound
@@ -73,11 +74,15 @@ def home_options(client, context, actor, auth_mode):
         return {"tmpfs": {"/config": f"rw,size={context['home_mb']}m,mode=1777"}}
     name = home_name(context, actor)
     with closing(classrooms.connect()) as db:
+        db.execute('BEGIN IMMEDIATE')
+        if plans.get(db,context['college_id']) and not quota_enabled():
+            raise HTTPException(503,'College plans require the quota backend for persistent storage.')
         db.execute("""INSERT OR IGNORE INTO student_homes
             (name,college_id,classroom_id,template_id,owner_subject,owner_email) VALUES (?,?,?,?,?,?)""",
             (name,context['college_id'],context['classroom_id'],context['template_id'],actor.subject,actor.email.lower()))
         entitlement=db.execute('SELECT limit_mb FROM storage_entitlements WHERE classroom_id=? AND email=?',
                                (context['classroom_id'],actor.email.lower())).fetchone()
+        plans.reserve_storage(db,context['classroom_id'],[actor.email.lower()],entitlement['limit_mb'])
         db.commit()
     if quota_enabled():
         result=quota_rpc('ensure',name=name,

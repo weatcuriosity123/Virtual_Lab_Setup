@@ -188,3 +188,77 @@ this additive table in place, but restores the older, broader college-admin perm
 For acceptance: sign in as each role, submit a storage request, verify no entitlement
 changed, approve as platform admin, verify the expiry/allowance, then test rejection
 and attempted direct college-admin storage writes (403).
+
+
+## College Plans & Usage
+
+The Plans & Usage menu shows each assigned college's seat limit, active reservations,
+monthly used/reserved hours, reserved persistent allowance and approved templates/hours.
+Only portal admins save plans. College admins submit a `college_plan` approval request;
+approval applies the complete proposed plan atomically. Requests cannot self-approve or
+access another college. Changing a plan requires that the college has no running or
+starting labs and no outstanding admission reservation. It cannot lower caps below
+already-consumed monthly hours or reserved storage. Timezone is fixed after first save
+so changing it cannot reset the monthly allowance.
+
+Existing colleges are **Not configured** after deployment. They retain their previous
+behavior until a portal admin explicitly saves a plan. New colleges likewise require
+explicit plan configuration before being considered budget-controlled. No RAM, CPU,
+task, image or global host-capacity configuration changes automatically.
+
+### Admission and time accounting
+
+* College-wide seats apply across all classrooms, in addition to classroom and host caps.
+* Only allowlisted template IDs can start. Template resources remain server-managed.
+* Access uses an IANA timezone and selected weekdays (Monday=0), with one same-day window.
+  Overnight windows and exceptions for holidays are not supported in this version.
+* Each start reserves the classroom duration plus at most five startup minutes, clipped
+  to closing time and the local calendar-month boundary. If insufficient monthly hours
+  remain for that reservation, admission is refused before a desktop is created.
+* Fewer than five minutes before closing cannot admit a new lab. On activation, the
+  ordinary classroom timer is clipped to the reserved absolute deadline. The existing
+  expiry/authorization checks and cleanup worker enforce that deadline.
+* Used time includes startup and elapsed session time; reserved time includes used time
+  plus the maximum remaining time of outstanding starts/labs. Activation releases unused
+  startup reservation. Successful cleanup on early end releases unused future minutes.
+  A failed launch with successful cleanup consumes no allowance. If cleanup fails or the
+  API crashes, keep the reservation conservatively until its deadline; this is not
+  provider billing telemetry and should not be billed as exact student attendance.
+* Idempotent launch retries do not reserve again. SQLite IMMEDIATE transactions serialize
+  college admission checks and reservations. The deployment remains a single Docker host
+  and one API worker; global locks/routing/storage are not multi-host orchestration.
+* Metering begins with planned admissions after configuration; historical sessions before
+  configuration are not retroactively charged. A running lab cannot carry into the next
+  college-local calendar month under a previous month's reservation.
+
+### Persistent allowance accounting
+
+The storage cap bounds **reserved subscription allowances**, not all physical cloud disk
+bytes. Reservations use the highest assigned MiB per classroom/email and are seeded from
+existing entitlement records on migration. Expired/disabled entitlements and quota
+reductions do not reclaim a reservation automatically, since saved files/backups may
+remain. New grants and increases must fit the college cap, including platform-admin
+writes and approval actions. Saved-home admission rechecks the reservation to catch
+operator/CLI changes and requires the quota backend for plan-managed persistence.
+
+A student enrolled in two classrooms consumes two allowances. Images, logs, root disks,
+legacy files, backups and identity-migration copies are not included in this allowance
+meter. This is not a physical disk cap or monetary budget. Reservation reclamation after
+verified deletion is deliberately not exposed yet; review retained files and raise the
+approved pool when needed. Disk monitoring and cloud billing alerts remain necessary.
+
+### Deployment acceptance
+
+1. Install while student labs are stopped; the installer backs up sources/database and
+   includes `plans.py`. The image installs timezone data for calendar rules.
+2. Before saving, review each college's displayed existing storage reservation. Keep the
+   Pi plan at one seat; choose real monthly hours and weekdays/window for the pilot.
+3. As a college admin, verify view-only plan access and request an increase. As portal
+   admin, inspect the exact values, approve or reject, and check the audit trail.
+4. Verify a disallowed template or closed-hours start is refused; verify approved access
+   works and used/reserved counters update on start/end. Do not increase Pi capacity to
+   test a second heavy desktop.
+
+All additions are database tables. Older code can ignore them on rollback, but doing so
+also removes plan enforcement. Keep the single API worker and review approvals before
+changing capacity during EC2 migration.

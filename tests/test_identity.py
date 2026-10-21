@@ -485,3 +485,51 @@ with ThreadPoolExecutor(max_workers=2) as pool:
     results=list(pool.map(lambda _:review(rid).status_code,range(2)))
 assert sorted(results)==[200,409],results
 print('PASS: platform-only storage and cost controls, scoped requests, expiry editing, atomic approval/rejection, stale protection and concurrent reviews')
+
+
+# College plans: role checks, scoped visibility, approval, and actual admission wiring.
+import plans
+plan_body=dict(seats=1,monthly_hours=20,storage_mb=8192,templates=['linux'],timezone='UTC',weekdays=list(range(7)),opens='00:00',closes='23:59')
+assert client.post('/admin/colleges/new/plan',headers=faculty,json=plan_body).status_code==403
+assert client.post('/admin/colleges/new/plan',headers=admin_headers,json={**plan_body,'closes':'00:00'}).status_code==422
+assert client.post('/admin/colleges/new/plan',headers=admin_headers,json=plan_body).status_code==200
+assert request('college_plan','test',plan_body).status_code==403
+rid=request('college_plan','new',{**plan_body,'monthly_hours':30}).json()['id']
+assert review(rid).status_code==200
+view=client.get('/admin/overview',headers=faculty).json()
+assert len(view['plans'])==1 and view['plans'][0]['config']['monthly_hours']==30
+with classrooms.connect() as db:
+    db.execute("UPDATE sessions SET status='expired'")
+# Failed launch returns its reservation; retrying a successful request does not charge twice.
+lab.docker_client.containers.run.side_effect=RuntimeError('test launch failure')
+assert client.post('/sessions',headers=headers('learner','learner@example.com'),json={'access_code':'faculty-rotated','request_id':'e'*32}).status_code==500
+with classrooms.connect() as db:
+    assert plans.usage(db,'new',plans.get(db,'new'),datetime.now(timezone.utc))['reserved_seconds']==0
+lab.docker_client.containers.run.side_effect=None
+started=client.post('/sessions',headers=headers('learner','learner@example.com'),json={'access_code':'faculty-rotated','request_id':'f'*32})
+assert started.status_code==200,started.text
+retry=client.post('/sessions',headers=headers('learner','learner@example.com'),json={'access_code':'faculty-rotated','request_id':'f'*32})
+assert retry.status_code==200 and retry.json()['session_id']==started.json()['session_id']
+assert client.post('/sessions',headers=headers('other','new@example.com'),json={'access_code':'faculty-rotated'}).status_code==429
+assert client.post('/admin/colleges/new/plan',headers=admin_headers,json=plan_body).status_code==409
+sid=started.json()['session_id']
+owner={**headers('learner','learner@example.com'),'X-Session-Password':started.json()['desktop_password']}
+# Simulate a near closing boundary while readiness completes; activation must preserve it.
+cap=datetime.now(timezone.utc)+timedelta(minutes=2)
+with classrooms.connect() as db:
+    db.execute('UPDATE college_lab_usage SET deadline=? WHERE token=?',(cap.isoformat(),sid))
+assert client.post('/lab/'+sid+'/activate',headers=owner).status_code==200
+with classrooms.connect() as db:
+    assert datetime.fromisoformat(db.execute('SELECT expires_at FROM sessions WHERE token=?',(sid,)).fetchone()[0])==cap
+assert client.post('/lab/'+sid+'/terminate',headers=owner).status_code==200
+with classrooms.connect() as db:
+    assert db.execute('SELECT ended_at FROM college_lab_usage WHERE token=?',(sid,)).fetchone()[0]
+# Cap applies to direct portal edits as well as approvals, with all-or-nothing rollback.
+with patch.dict(os.environ,{'PERSISTENT_HOME_TEMPLATES':'linux'}):
+    assert client.post('/admin/classrooms/faculty-class/storage',headers=admin_headers,json={'emails':'learner@example.com','persistent':True,'limit_mb':16384}).status_code==409
+    rid=request('storage','faculty-class',{'emails':'learner@example.com','persistent':True,'limit_mb':16384}).json()['id']
+    assert review(rid).status_code==409
+    with classrooms.connect() as db:
+        assert db.execute('SELECT status FROM admin_requests WHERE id=?',(rid,)).fetchone()[0]=='pending'
+        assert plans.usage(db,'new',plans.get(db,'new'),datetime.now(timezone.utc))['storage_reserved_mb']<=8192
+print('PASS: college-plan role and approval boundaries, live admission limits, retry accounting, failed-launch refund, closing-time activation and storage-cap rollback')

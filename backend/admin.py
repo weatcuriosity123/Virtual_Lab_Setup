@@ -13,6 +13,7 @@ from typing import Literal
 import classrooms
 import identity
 import storage
+import plans
 from docker.errors import APIError, NotFound
 
 
@@ -62,7 +63,7 @@ class StorageSubscription(BulkMembers):
 
 
 class ApprovalRequest(BaseModel):
-    kind: Literal['storage', 'enrollment', 'classroom_create', 'classroom_enable']
+    kind: Literal['storage', 'enrollment', 'classroom_create', 'classroom_enable', 'college_plan']
     target: str = Field(min_length=1, max_length=64)
     payload: dict
     reason: str = Field(min_length=1, max_length=2000, pattern=r'.*\S.*')
@@ -207,6 +208,13 @@ def make_router(lab):
             for item in result['requests']:
                 item['payload'] = json.loads(item['payload'])
                 item.pop('baseline', None)
+            result['plans'] = []
+            for college in result['colleges']:
+                plan = plans.get(db,college['id'])
+                item = {'college_id':college['id'], 'configured':bool(plan), 'storage_reserved_mb':plans.storage_total(db,college['id'])}
+                if plan:
+                    item.update(config=plan.model_dump(),usage=plans.usage(db,college['id'],plan,datetime.now(timezone.utc)))
+                result['plans'].append(item)
             result['quota_backend'] = storage.quota_enabled()
             result['capacity'] = lab.MAX_SESSIONS
             return result
@@ -372,6 +380,8 @@ def make_router(lab):
                 VALUES (?,?,?,?,?) ON CONFLICT(classroom_id,email) DO UPDATE SET
                 persistent=excluded.persistent, expires_at=excluded.expires_at, limit_mb=excluded.limit_mb""",
                 (key,email,body.persistent,expiry,body.limit_mb))
+        if body.persistent:
+            plans.reserve_storage(db,key,emails,body.limit_mb)
         return emails, expiry
 
     @router.post('/classrooms/{key}/storage')
@@ -386,7 +396,7 @@ def make_router(lab):
 
     def proposal(body):
         models = {'storage': StorageSubscription, 'enrollment': BulkMembers,
-                  'classroom_create': ClassroomProposal, 'classroom_enable': State}
+                  'classroom_create': ClassroomProposal, 'classroom_enable': State, 'college_plan': plans.CollegePlan}
         model = models[body.kind]
         if set(body.payload) - set(model.model_fields):
             raise HTTPException(400, 'Unexpected request fields.')
@@ -407,6 +417,8 @@ def make_router(lab):
         def row(sql, args):
             item = db.execute(sql,args).fetchone()
             return dict(item) if item else None
+        if kind == 'college_plan':
+            return json.dumps(row('SELECT * FROM college_plans WHERE college_id=?',(target,)),sort_keys=True)
         if kind == 'classroom_create':
             state = {'college':row('SELECT * FROM colleges WHERE id=?',(target,)),
                      'template':row('SELECT * FROM lab_templates WHERE id=?',(value.template_id,)),
@@ -422,16 +434,22 @@ def make_router(lab):
                 state['storage'] = [row('SELECT * FROM storage_entitlements WHERE classroom_id=? AND email=?',(target,email)) for email in value.emails.splitlines()]
         return json.dumps(state, sort_keys=True)
 
+    @router.post('/colleges/{key}/plan')
+    def save_plan(key: str, body: plans.CollegePlan):
+        identity.require_platform_admin()
+        return write(lambda db: plans.save(db,key,body), 'college.plan_changed', key, body.model_dump())
+
     @router.post('/requests')
     def create_request(body: ApprovalRequest):
         value = proposal(body)
         result = {}
         with closing(classrooms.connect()) as db:
             db.execute('BEGIN IMMEDIATE')
-            if body.kind == 'classroom_create':
+            if body.kind in ('classroom_create','college_plan'):
                 identity.require_college_admin(db, body.target)
                 exists(db, 'colleges', body.target)
-                exists(db, 'lab_templates', value.template_id)
+                if body.kind == 'classroom_create':
+                    exists(db, 'lab_templates', value.template_id)
                 college_id = body.target
             else:
                 classroom_scope(db, body.target)
@@ -469,7 +487,9 @@ def make_router(lab):
                 key = row['target']
                 if request_baseline(db,row['kind'],key,value) != row['baseline']:
                     raise HTTPException(409, 'Access or resource settings changed since this request. Reject it and submit a fresh request.')
-                if row['kind'] == 'classroom_create':
+                if row['kind'] == 'college_plan':
+                    plans.save(db,key,value)
+                elif row['kind'] == 'classroom_create':
                     if not body.code:
                         raise HTTPException(400, 'Set a classroom code when approving this request.')
                     exists(db, 'colleges', key)

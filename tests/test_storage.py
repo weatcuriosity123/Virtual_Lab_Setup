@@ -24,7 +24,7 @@ client.volumes.create.side_effect = lambda **kw: SimpleNamespace(attrs={'Labels'
 with patch.dict(os.environ, {'PERSISTENT_HOME_TEMPLATES': ''}):
     assert 'tmpfs' in storage.home_options(client, context, alice, 'cloudflare')
 client.volumes.get.assert_not_called()
-with patch.dict(os.environ, {'PERSISTENT_HOME_TEMPLATES': 'cse'}), patch.object(storage, 'subscription_active', return_value=True), patch.object(storage.classrooms, 'connect', return_value=MagicMock()):
+with patch.dict(os.environ, {'PERSISTENT_HOME_TEMPLATES': 'cse'}), patch.object(storage, 'subscription_active', return_value=True), patch.object(storage.classrooms, 'connect', return_value=MagicMock()), patch.object(storage.plans,'get',return_value=None), patch.object(storage.plans,'reserve_storage'):
     for actor, mode in [(None, 'cloudflare'), (alice, 'off')]:
         try:
             storage.home_options(client, context, actor, mode)

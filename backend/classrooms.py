@@ -70,6 +70,8 @@ def init_catalog(db):
         status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
         reviewed_by TEXT, reviewed_at TEXT, review_note TEXT)""")
     db.execute('CREATE INDEX IF NOT EXISTS admin_requests_scope ON admin_requests(college_id,status)')
+    import plans
+    plans.init(db)
     db.commit()
 
 

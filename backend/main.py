@@ -16,6 +16,7 @@ import network_guard
 import disk_guard
 import desktop_runtime
 import packet_capture
+import plans
 from docker.errors import DockerException, NotFound
 from fastapi import FastAPI, HTTPException, Request as HttpRequest
 from fastapi.responses import JSONResponse
@@ -190,6 +191,7 @@ def delete_session(token: str):
         delete_container(row["container_name"])
         (CONFIG_DIR / f"{token}.conf").unlink(missing_ok=True)
 
+        plans.finish(db, token)
         db.execute(
             "UPDATE sessions SET status = 'expired' WHERE token = ?",
             (token,),
@@ -358,10 +360,12 @@ async def create_session(request: CreateSession):
         network_options = await asyncio.to_thread(network_guard.container_options, DOCKER_NETWORK)
         selected_image = await asyncio.to_thread(docker_client.images.get, context["image"])
         runtime_options = await asyncio.to_thread(desktop_runtime.options, docker_client, selected_image, context)
-        home_options = await asyncio.to_thread(storage.home_options, docker_client, context, identity.actor(), identity.MODE)
-        desktop_options = desktop_runtime.merge_home(runtime_options, home_options)
-
+        now = datetime.now(timezone.utc)
+        expires = now + timedelta(minutes=5)
+        await asyncio.to_thread(plans.reserve, token, context, now)
         try:
+            home_options = await asyncio.to_thread(storage.home_options, docker_client, context, identity.actor(), identity.MODE)
+            desktop_options = desktop_runtime.merge_home(runtime_options, home_options)
             docker_client.containers.run(
                 image=selected_image.id,
                 name=container_name,
@@ -425,9 +429,14 @@ async def create_session(request: CreateSession):
                 pass
             try:
                 delete_container(container_name)
+                with closing(connect_db()) as db:
+                    plans.finish(db, token, failed=True)
+                    db.commit()
             except Exception:
                 pass
 
+            if isinstance(exc, HTTPException):
+                raise
             print(f"Session creation failed: {exc}", flush=True)
             raise HTTPException(
                 status_code=500,
@@ -891,6 +900,12 @@ async def activate_desktop(token: str, x_session_password: str = Header(...)):
             raise HTTPException(409, "Startup has ended.")
         expires = datetime.now(timezone.utc) + timedelta(minutes=row["session_minutes"] or SESSION_MINUTES)
         with closing(connect_db()) as db:
+            cap = plans.deadline(db, token)
+            if cap:
+                expires = min(expires, cap)
+                if expires <= datetime.now(timezone.utc):
+                    raise HTTPException(403, "The college access window has ended.")
+                db.execute('UPDATE college_lab_usage SET deadline=? WHERE token=?', (expires.isoformat(),token))
             db.execute("UPDATE sessions SET status='active', expires_at=? WHERE token=?",
                        (expires.isoformat(), token))
             db.commit()
