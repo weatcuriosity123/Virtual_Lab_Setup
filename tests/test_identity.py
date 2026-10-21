@@ -210,8 +210,10 @@ for path,payload in [
     ('classrooms/test-class/members/bulk',{'emails':'intruder@example.com'}),
     ('sessions/'+session['session_id']+'/terminate',{})]:
     assert client.post('/admin/'+path,headers=faculty,json=payload).status_code==403,path
-assert client.post('/admin/classrooms',headers=faculty,json={**body,'id':'faculty-class','code':'faculty-code'}).status_code==200
-assert client.post('/admin/classrooms/faculty-class/members/bulk',headers=faculty,json={'emails':'learner@example.com'}).status_code==200
+assert client.post('/admin/classrooms',headers=faculty,json={**body,'id':'faculty-class','code':'faculty-code'}).status_code==403
+assert client.post('/admin/classrooms',headers=admin_headers,json={**body,'id':'faculty-class','code':'faculty-code'}).status_code==200
+assert client.post('/admin/classrooms/faculty-class/members/bulk',headers=faculty,json={'emails':'learner@example.com'}).status_code==403
+assert client.post('/admin/classrooms/faculty-class/members/bulk',headers=admin_headers,json={'emails':'learner@example.com'}).status_code==200
 assert client.post('/admin/classrooms/faculty-class/code',headers=faculty,json={'code':'faculty-rotated'}).status_code==200
 assert client.post('/admin/classrooms/faculty-class/enabled',headers=faculty,json={'enabled':False}).status_code==200
 # Make two active labs and feedback records, then verify scope before/after termination.
@@ -307,7 +309,7 @@ lab.docker_client.containers.list.return_value=[]
 body={'name':home['name'],'confirmation':'DELETE alice@example.com'}
 assert client.get('/admin/saved-homes',headers=headers()).status_code==403
 assert client.get('/admin/saved-homes',headers=faculty).json()['homes']==[]
-assert client.post('/admin/saved-homes/delete',headers=faculty,json=body).status_code==404
+assert client.post('/admin/saved-homes/delete',headers=faculty,json=body).status_code==403
 assert client.post('/admin/saved-homes/delete',headers=admin_headers,json={**body,'confirmation':'yes'}).status_code==400
 lab.docker_client.containers.list.return_value=[object()]
 assert client.post('/admin/saved-homes/delete',headers=admin_headers,json=body).status_code==409
@@ -391,3 +393,95 @@ with patch.object(lab.docker_client, 'ping', side_effect=RuntimeError('secret-in
     assert checks['Docker']['status']=='UNAVAILABLE'
     assert checks['Database filesystem space']['status']=='CRITICAL'
 print('System health authorization, failure redaction and low-disk checks passed.')
+
+
+# Approval workflow: requests cannot grant access; only portal admins apply them.
+def request(kind, target, payload, who=faculty):
+    return client.post('/admin/requests', headers=who,
+                       json={'kind':kind,'target':target,'payload':payload,'reason':'Course practical'})
+def review(rid, approve=True, **kwargs):
+    return client.post(f'/admin/requests/{rid}/review', headers=admin_headers,
+                       json={'approve':approve,'note':'Reviewed for pilot','code':kwargs.get('code')})
+with patch.dict(os.environ, {'PERSISTENT_HOME_TEMPLATES':'linux'}):
+    storage_payload={'emails':'learner@example.com','persistent':True,'limit_mb':2048,'expires_at':None}
+    assert client.post('/admin/classrooms/faculty-class/storage',headers=faculty,json=storage_payload).status_code==403
+    assert client.post('/admin/classrooms/faculty-class/members',headers=faculty,json={'email':'new@example.com'}).status_code==403
+    assert client.post('/admin/classrooms/faculty-class/enabled',headers=faculty,json={'enabled':True}).status_code==403
+    assert request('storage','test-class',storage_payload).status_code==403
+    assert request('storage','faculty-class',storage_payload,headers()).status_code==403
+    assert request('storage','faculty-class',{**storage_payload,'limit_mb':99999}).status_code==400
+    assert request('storage','faculty-class',{**storage_payload,'emails':'missing@example.com'}).status_code==400
+    response=request('storage','faculty-class',storage_payload)
+    assert response.status_code==200,response.text
+    rid=response.json()['id']
+    assert request('storage','faculty-class',storage_payload).json()['id']==rid
+    with classrooms.connect() as db:
+        assert db.execute("SELECT * FROM storage_entitlements WHERE classroom_id='faculty-class'").fetchone() is None
+    assert client.post(f'/admin/requests/{rid}/review',headers=faculty,json={'approve':True}).status_code==403
+    approved_response=review(rid)
+    assert approved_response.status_code==200,approved_response.text
+    assert review(rid).status_code==409
+    with classrooms.connect() as db:
+        entry=db.execute("SELECT * FROM storage_entitlements WHERE classroom_id='faculty-class'").fetchone()
+        assert entry['persistent']==1 and entry['expires_at'] is None and entry['limit_mb']==2048
+    # Direct platform editing of a previously indefinite expiry preserves explicit quota.
+    future='2099-01-01T00:00:00Z'
+    assert client.post('/admin/classrooms/faculty-class/storage',headers=admin_headers,json={**storage_payload,'expires_at':future}).status_code==200
+    view=client.get('/admin/overview',headers=faculty).json()
+    assert any(e['expires_at'] and e['limit_mb']==2048 for e in view['storage_entitlements'])
+    assert all('baseline' not in r for r in view['requests'])
+    # Reject without changing access.
+    rid=request('storage','faculty-class',{**storage_payload,'limit_mb':4096}).json()['id']
+    assert review(rid,False).status_code==200
+    with classrooms.connect() as db:
+        assert db.execute("SELECT limit_mb FROM storage_entitlements WHERE classroom_id='faculty-class'").fetchone()[0]==2048
+    # A newer platform decision cannot be overwritten by an older pending request.
+    rid=request('storage','faculty-class',storage_payload).json()['id']
+    assert client.post('/admin/classrooms/faculty-class/storage',headers=admin_headers,json={**storage_payload,'limit_mb':1024}).status_code==200
+    assert review(rid).status_code==409
+    assert review(rid,False).status_code==200
+    # Approval audit failure rolls back both entitlement and request status.
+    rid=request('storage','faculty-class',storage_payload).json()['id']
+    original_dumps=__import__('json').dumps
+    def fail_audit(value, *args, **kwargs):
+        if isinstance(value,dict) and value.get('note')=='Reviewed for pilot':
+            raise RuntimeError('audit unavailable')
+        return original_dumps(value,*args,**kwargs)
+    with patch('admin.json.dumps',side_effect=fail_audit):
+        try:
+            review(rid)
+            raise AssertionError('Audit failure did not propagate')
+        except RuntimeError:
+            pass
+    with classrooms.connect() as db:
+        assert db.execute('SELECT status FROM admin_requests WHERE id=?',(rid,)).fetchone()[0]=='pending'
+        assert db.execute("SELECT limit_mb FROM storage_entitlements WHERE classroom_id='faculty-class'").fetchone()[0]==1024
+    assert review(rid).status_code==200
+# Enrollment requests, normalization, and scope visibility.
+rid=request('enrollment','faculty-class',{'emails':'NEW@example.com,new@example.com'}).json()['id']
+with classrooms.connect() as db:
+    assert db.execute("SELECT 1 FROM classroom_memberships WHERE classroom_id='faculty-class' AND email='new@example.com'").fetchone() is None
+assert review(rid).status_code==200
+with classrooms.connect() as db:
+    assert db.execute("SELECT count(*) FROM classroom_memberships WHERE classroom_id='faculty-class' AND email='new@example.com'").fetchone()[0]==1
+rid=request('classroom_enable','faculty-class',{'enabled':True}).json()['id']
+assert review(rid).status_code==200
+proposal={'id':'approved-class','name':'Approved Class','template_id':'linux','session_minutes':30,'max_sessions':1}
+rid=request('classroom_create','new',proposal).json()['id']
+assert review(rid).status_code==400
+assert review(rid,code='approved-secret').status_code==200
+with classrooms.connect() as db:
+    approved=db.execute("SELECT * FROM classrooms WHERE id='approved-class'").fetchone()
+    assert approved['max_sessions']==1 and classrooms.matches('approved-secret',approved)
+view=client.get('/admin/overview',headers=faculty).json()
+assert all(r['college_id']=='new' for r in view['requests'])
+assert 'approved-secret' not in str(view)
+# Requests from another college stay invisible.
+rid=request('enrollment','test-class',{'emails':'other@example.com'},admin_headers).json()['id']
+assert rid not in [r['id'] for r in client.get('/admin/overview',headers=faculty).json()['requests']]
+# Double approval is serialized; exactly one succeeds.
+from concurrent.futures import ThreadPoolExecutor
+with ThreadPoolExecutor(max_workers=2) as pool:
+    results=list(pool.map(lambda _:review(rid).status_code,range(2)))
+assert sorted(results)==[200,409],results
+print('PASS: platform-only storage and cost controls, scoped requests, expiry editing, atomic approval/rejection, stale protection and concurrent reviews')

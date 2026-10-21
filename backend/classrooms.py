@@ -62,6 +62,14 @@ def init_catalog(db):
     db.execute("CREATE TABLE IF NOT EXISTS college_admins (college_id TEXT NOT NULL REFERENCES colleges(id), email TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(college_id,email))")
     if 'college_id' not in {row[1] for row in db.execute('PRAGMA table_info(admin_events)')}:
         db.execute('ALTER TABLE admin_events ADD COLUMN college_id TEXT')
+    db.execute("""CREATE TABLE IF NOT EXISTS admin_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        college_id TEXT NOT NULL REFERENCES colleges(id),
+        kind TEXT NOT NULL, target TEXT NOT NULL, payload TEXT NOT NULL, baseline TEXT NOT NULL,
+        reason TEXT NOT NULL, requested_by TEXT NOT NULL, requested_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+        reviewed_by TEXT, reviewed_at TEXT, review_note TEXT)""")
+    db.execute('CREATE INDEX IF NOT EXISTS admin_requests_scope ON admin_requests(college_id,status)')
     db.commit()
 
 

@@ -84,12 +84,14 @@ subsequent API requests, without rebuilding or restarting the server. Revoking
 one college assignment keeps any other assignments intact. An assignment does
 not override platform privileges from `ADMIN_EMAILS`.
 
-College admins can create classrooms in their assigned colleges, select from the
-shared template catalog, rotate codes, manage enrollment, disable/enable classrooms,
-terminate their colleges' labs, and read their colleges' feedback and activity.
-They cannot grant roles, create/disable colleges, or access another college's labs.
-Host capacity is shared. Per-college resource budgets and template entitlements
-are not part of this release.
+College admins can view only their assigned colleges, rotate codes, disable enrollment
+or classroom admissions, terminate their colleges' labs, and read feedback/activity.
+New classrooms, new/re-enabled enrollments, classroom re-enabling, and any storage
+subscription changes require platform-admin approval. These restrictions are enforced
+by the API, including when callers bypass the dashboard. Saved-home deletion is
+platform-only. College admins cannot grant roles or modify colleges or template resources.
+Host capacity remains shared. This approval gate prevents unapproved changes to access;
+it is not a cloud billing cap or a limit on repeat usage by already-approved students.
 
 Allow faculty through the existing Cloudflare policy separately. Student lab
 access still requires classroom enrollment; admin permission does not grant the
@@ -144,3 +146,45 @@ storage when it is unavailable. Saved-home rows show actual quota usage and the
 current enforced limit. Subscription rows show the requested next-start allowance.
 Pool capacity and current home usage may prevent a requested allowance being applied.
 Original migration copies are retained separately from the active quota home.
+
+
+## Storage expiry and approval requests
+
+Storage now lists every enrolled email, next-lab access, allowance, and expiry.
+A persistent entitlement with NULL expiry displays **Not set yet — no expiry** and
+continues indefinitely. Temporary access displays **Not applicable**. Existing data
+is not reinterpreted or assigned a default expiry during migration.
+
+Platform admins select **Edit access / expiry**, set a future local date/time or
+leave it blank, and save. Changes apply to the next lab. Expiring or disabling
+persistence does not delete retained homes or stop existing sessions.
+
+College admins use **Request persistent storage**; they cannot apply changes or
+permanently delete saved files. Classroom creation/enrollment forms submit requests
+for college admins. Enabling a disabled classroom or enrollment also submits a request.
+The **Approvals** menu shows pending and reviewed requests. Only platform admins can
+approve/reject. Classroom approval requires the platform admin to set a class code;
+share it privately after approval. Codes are never stored in request payloads or logs.
+
+Requests are scoped to their college, include a reason, and record requester/reviewer
+and timestamps. Identical pending requests reuse the existing ID; each college can
+have at most 100 pending requests. Approval, access change and audit commit in one
+SQLite transaction. Repeated/concurrent reviews cannot apply a request twice.
+If affected access or resource configuration changed in the meantime, approval fails;
+reject the stale request and submit a fresh one. Expiries are revalidated on approval.
+No request sends email or provisions cloud infrastructure. Review the dashboard queue.
+
+Existing approved access continues after upgrading. Audit existing indefinite
+entitlements before any cloud deployment. Enforced monetary budgets, aggregate
+persistent-byte budgets, scheduled access and monthly student-hour quotas are separate
+future controls; this feature does not promise a zero-overrun cloud bill.
+
+### Deploy this update
+
+Back up the live database and backend first. Install the reviewed branch with the
+existing installer. API startup creates `admin_requests` and its index without
+changing existing entitlements or runtime RAM/task limits. A code rollback may leave
+this additive table in place, but restores the older, broader college-admin permissions.
+For acceptance: sign in as each role, submit a storage request, verify no entitlement
+changed, approve as platform admin, verify the expiry/allowance, then test rejection
+and attempted direct college-admin storage writes (403).
