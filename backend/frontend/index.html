@@ -33,6 +33,7 @@ iframe{width:100%;flex:1;min-height:0;border:0;background:#111}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.spinner{animation:none}}
 @media(max-width:540px){.card{margin:24px 12px;padding:22px}}
+.policy-footer{padding:20px 28px;text-align:center;color:#b3c1d6;font:14px/1.7 system-ui,sans-serif;border-top:1px solid #334155}.policy-footer a{color:#8ee4ce;text-underline-offset:3px}.policy-footer a:focus-visible{outline:3px solid #fff;outline-offset:4px}
 </style>
 </head>
 <body>
@@ -921,5 +922,7 @@ api("/me").then(data => {
   });
 })();
 </script>
+<footer class="policy-footer"><nav aria-label="Privacy and data handling"><a href="/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a><span aria-hidden="true"> · </span><a href="/data-handling" target="_blank" rel="noopener">Data Handling Note</a></nav></footer>
 </body>
 </html>
+

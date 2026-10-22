@@ -5,6 +5,7 @@
 
 [hidden]{display:none!important}.admin-layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:24px}.admin-nav{position:sticky;top:16px;align-self:start;display:grid;gap:7px;padding:14px;background:#111d30;border:1px solid #28354b;border-radius:14px}.admin-nav a{padding:11px 12px;border-radius:7px;text-decoration:none;color:#c6d4e8}.admin-nav a[aria-current="page"]{background:#185b56;color:white}.admin-nav a:hover{background:#20334c}.admin-nav a:focus-visible{outline:2px solid #77d8cc}.admin-pages{min-width:0}.page-heading{margin:0 0 20px}#menuToggle{display:none}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}.metric{background:#0c1729;border-radius:9px;padding:16px}.metric strong{display:block;font-size:26px}.metric span{color:#a6b5ca}
 @media(max-width:760px){header{padding:18px;gap:12px;flex-wrap:wrap}main{padding:14px}.admin-layout{grid-template-columns:1fr;gap:14px}.admin-nav{position:static}#menuToggle{display:block}.admin-nav.mobile-closed{display:none}.grid{grid-template-columns:1fr}section{padding:16px}.toolbar{flex-wrap:wrap}}
+.policy-footer{padding:20px 28px;text-align:center;color:#b3c1d6;font:14px/1.7 system-ui,sans-serif;border-top:1px solid #334155}.policy-footer a{color:#8ee4ce;text-underline-offset:3px}.policy-footer a:focus-visible{outline:3px solid #fff;outline-offset:4px}
 </style></head><body>
 <header><div><small>LINUX LAB / CONTROL PANEL</small><h1>Administration</h1><span id="account">Checking access…</span></div><div><a href="/">Student portal ↗</a> <button type="button" data-logout>Log out</button></div></header>
 <main><div id="notice" role="status">Verifying your administrator account…</div><div id="content" hidden>
@@ -192,4 +193,6 @@ form('assignAdmin',data=>api('colleges/'+encodeURIComponent(data.college)+'/admi
   });
 })();
 </script>
+<footer class="policy-footer"><nav aria-label="Privacy and data handling"><a href="/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a><span aria-hidden="true"> · </span><a href="/data-handling" target="_blank" rel="noopener">Data Handling Note</a></nav></footer>
 </body></html>
+
